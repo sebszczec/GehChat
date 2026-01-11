@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/irc_service.dart';
 import '../services/notification_service.dart';
-import '../services/foreground_service_manager.dart';
 import '../services/connection_settings_service.dart';
 
 class ChatState extends ChangeNotifier {
@@ -73,6 +71,14 @@ class ChatState extends ChangeNotifier {
   String get nickname => _ircService.nickname;
   String get channel => _ircService.channel;
   String? get activeChat => _activeChat;
+
+  // Get only system messages
+  List<IrcMessage> get systemMessages =>
+      _channelMessages.where((msg) => msg.isSystem).toList();
+
+  // Get only user messages (not system messages)
+  List<IrcMessage> get userMessages =>
+      _channelMessages.where((msg) => !msg.isSystem).toList();
 
   void setAppLifecycleState(AppLifecycleState state) {
     _appLifecycleState = state;

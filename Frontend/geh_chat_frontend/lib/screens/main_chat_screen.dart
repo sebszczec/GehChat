@@ -7,6 +7,7 @@ import '../services/irc_service.dart';
 import '../l10n/app_localizations.dart';
 import 'private_chat_screen.dart';
 import 'connection_screen.dart';
+import 'system_messages_screen.dart';
 
 class MainChatScreen extends StatefulWidget {
   const MainChatScreen({super.key});
@@ -40,7 +41,7 @@ class _MainChatScreenState extends State<MainChatScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         final chatState = context.read<ChatState>();
-        _previousMessageCount = chatState.channelMessages.length;
+        _previousMessageCount = chatState.userMessages.length;
         // Set main channel as active chat
         chatState.setActiveChat(null);
       }
@@ -100,8 +101,8 @@ class _MainChatScreenState extends State<MainChatScreen>
 
   void _checkAndScrollForNewMessages() {
     final chatState = context.read<ChatState>();
-    if (chatState.channelMessages.length > _previousMessageCount) {
-      _previousMessageCount = chatState.channelMessages.length;
+    if (chatState.userMessages.length > _previousMessageCount) {
+      _previousMessageCount = chatState.userMessages.length;
 
       final userScrolledRecently =
           _lastUserScrollTime != null &&
@@ -182,6 +183,19 @@ class _MainChatScreenState extends State<MainChatScreen>
       appBar: AppBar(
         title: Text(chatState.channel),
         actions: [
+          // System messages button
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SystemMessagesScreen(),
+                ),
+              );
+            },
+            tooltip: loc.systemMessages,
+          ),
           // Disconnect button
           IconButton(
             icon: const Icon(Icons.power_settings_new),
@@ -237,7 +251,8 @@ class _MainChatScreenState extends State<MainChatScreen>
                 },
               ),
               if (chatState.users
-                      .where((user) => user != chatState.nickname).isNotEmpty)
+                  .where((user) => user != chatState.nickname)
+                  .isNotEmpty)
                 Positioned(
                   right: 8,
                   top: 8,
@@ -305,7 +320,7 @@ class _MainChatScreenState extends State<MainChatScreen>
             children: [
               // Messages list
               Expanded(
-                child: chatState.channelMessages.isEmpty
+                child: chatState.userMessages.isEmpty
                     ? Center(
                         child: Text(
                           chatState.connectionState ==
@@ -318,9 +333,9 @@ class _MainChatScreenState extends State<MainChatScreen>
                     : ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.all(8),
-                        itemCount: chatState.channelMessages.length,
+                        itemCount: chatState.userMessages.length,
                         itemBuilder: (context, index) {
-                          final message = chatState.channelMessages[index];
+                          final message = chatState.userMessages[index];
                           return _buildMessageBubble(
                             message,
                             chatState.nickname,

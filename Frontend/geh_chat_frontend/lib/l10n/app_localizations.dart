@@ -43,6 +43,8 @@ abstract class AppLocalizations {
   String get showAllIrcMessages;
   String get connect;
   String get channelHint;
+  String get systemMessages;
+  String get noSystemMessages;
 }
 
 class AppLocalizationsEn extends AppLocalizations {
@@ -161,6 +163,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get channelHint => '#channel';
+
+  @override
+  String get systemMessages => 'System Messages';
+
+  @override
+  String get noSystemMessages => 'No system messages';
 }
 
 // Polish localization ready to be implemented
@@ -280,6 +288,12 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get channelHint => '#kanał';
+
+  @override
+  String get systemMessages => 'Wiadomości systemowe';
+
+  @override
+  String get noSystemMessages => 'Brak wiadomości systemowych';
 }
 
 class AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {
