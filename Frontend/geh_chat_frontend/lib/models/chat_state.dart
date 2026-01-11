@@ -153,7 +153,11 @@ class ChatState extends ChangeNotifier {
     } else if (state == IrcConnectionState.disconnected ||
         state == IrcConnectionState.error) {
       _notificationService.hidePersistentNotification();
-      // Connection lost - connectivity monitor will handle auto-reconnect if appropriate
+      // Connection lost - start reconnect timer if not manually disconnected
+      if (!_wasManuallyDisconnected && _lastConnectionSettings != null) {
+        debugPrint('Connection lost - starting reconnect timer...');
+        _startReconnectTimer();
+      }
     }
 
     notifyListeners();
@@ -209,17 +213,15 @@ class ChatState extends ChangeNotifier {
 
   void _startReconnectTimer() {
     _stopReconnectTimer();
-    debugPrint('Starting auto-reconnect timer...');
-    _reconnectTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+    debugPrint('Starting auto-reconnect timer (every 5 seconds)...');
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       if (_connectionState != IrcConnectionState.connected &&
           _connectionState != IrcConnectionState.connecting &&
-          _connectionState != IrcConnectionState.joiningChannel) {
+          _connectionState != IrcConnectionState.joiningChannel &&
+          !_wasManuallyDisconnected &&
+          _lastConnectionSettings != null) {
         debugPrint('Attempting to reconnect...');
-        try {
-          await _ircService.connect();
-        } catch (e) {
-          debugPrint('Reconnect attempt failed: $e');
-        }
+        _attemptAutoReconnect();
       }
     });
   }

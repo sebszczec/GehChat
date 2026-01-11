@@ -31,12 +31,63 @@ class IrcService {
   String? _originalNickname;
   Timer? _nicknameRetryTimer;
 
+  // Translation maps for system messages
+  static final Map<String, Map<String, String>> _translations = {
+    'connecting': {'en': 'Connecting to', 'pl': 'Łączenie z'},
+    'connected': {'en': 'Connected to server!', 'pl': 'Połączono z serwerem!'},
+    'using_nickname': {'en': 'Using nickname:', 'pl': 'Używany nick:'},
+    'sent_auth': {
+      'en': 'Sent authentication to server...',
+      'pl': 'Wysłano autoryzację do serwera...',
+    },
+    'nickname_in_use': {'en': 'Nickname', 'pl': 'Nick'},
+    'nickname_in_use_retry': {
+      'en': 'is already in use. Retrying in 2 seconds (attempt',
+      'pl': 'jest już zajęty. Ponowna próba za 2 sekundy (próba',
+    },
+    'nickname_still_in_use': {
+      'en': 'Nickname still in use after 10 attempts. Trying with',
+      'pl': 'Nick nadal zajęty po 10 próbach. Próbuję z',
+    },
+    'received_motd': {
+      'en': 'Received end of MOTD, joining channel...',
+      'pl': 'Otrzymano koniec MOTD, dołączanie do kanału...',
+    },
+    'joining_channel': {'en': 'Joining channel', 'pl': 'Dołączanie do kanału'},
+    'joined_channel': {
+      'en': 'Successfully joined channel!',
+      'pl': 'Pomyślnie dołączono do kanału!',
+    },
+    'active_users': {'en': 'Active users:', 'pl': 'Aktywni użytkownicy:'},
+    'joined': {'en': 'joined the channel', 'pl': 'dołączył do kanału'},
+    'left': {'en': 'left the channel', 'pl': 'opuścił kanał'},
+    'quit': {'en': 'quit', 'pl': 'rozłączył się'},
+    'disconnected': {
+      'en': 'Disconnected from server',
+      'pl': 'Rozłączono z serwerem',
+    },
+    'connection_error': {
+      'en': 'Connection error occurred',
+      'pl': 'Wystąpił błąd połączenia',
+    },
+  };
+
   IrcService({String? server, int? port, String? channel})
     : server = server ?? 'slaugh.pl',
       port = port ?? 6667,
       channel = channel ?? '#vorest';
 
   String get nickname => _nickname ?? '';
+
+  // Get translated message
+  String _t(String key, {String? suffix}) {
+    final locale = Platform.localeName.toLowerCase();
+    final isPolish = locale.startsWith('pl');
+    final lang = isPolish ? 'pl' : 'en';
+    final translation =
+        _translations[key]?[lang] ?? _translations[key]?['en'] ?? key;
+    return suffix != null ? '$translation $suffix' : translation;
+  }
 
   void updateSettings({String? newServer, int? newPort, String? newChannel}) {
     if (newServer != null) server = newServer;
@@ -60,7 +111,7 @@ class IrcService {
   Future<void> connect({String? customNickname}) async {
     try {
       _connectionStateController.add(IrcConnectionState.connecting);
-      _addSystemMessage('Connecting to $server:$port...');
+      _addSystemMessage('${_t('connecting')} $server:$port...');
 
       _socket = await Socket.connect(server, port);
 
@@ -69,30 +120,32 @@ class IrcService {
 
       _isConnected = true;
       _connectionStateController.add(IrcConnectionState.joiningChannel);
-      _addSystemMessage('Connected to server!');
+      _addSystemMessage(_t('connected'));
 
       // Start keepalive timer - send PING every 30 seconds
       _startKeepaliveTimer();
 
       // Generate random friendly nickname if not provided
       _nickname = customNickname ?? _generateFriendlyNickname();
-      _addSystemMessage('Using nickname: $_nickname');
+      _addSystemMessage('${_t('using_nickname')} $_nickname');
 
       // Send IRC handshake
       _sendRaw('NICK $_nickname');
       _sendRaw('USER $_nickname 0 * :$_nickname');
-      _addSystemMessage('Sent authentication to server...');
+      _addSystemMessage(_t('sent_auth'));
 
       // Listen to server messages
       _socket!.listen(
         _handleServerData,
         onError: (error) {
           _isConnected = false;
+          _addSystemMessage(_t('connection_error'));
           _connectionStateController.add(IrcConnectionState.error);
           _messageController.addError(error);
         },
         onDone: () {
           _isConnected = false;
+          _addSystemMessage(_t('disconnected'));
           _connectionStateController.add(IrcConnectionState.disconnected);
         },
       );
@@ -107,7 +160,7 @@ class IrcService {
 
   void joinChannel() {
     if (_isConnected) {
-      _addSystemMessage('Joining channel $channel...');
+      _addSystemMessage('${_t('joining_channel')} $channel...');
       _sendRaw('JOIN $channel');
     }
   }
@@ -177,7 +230,7 @@ class IrcService {
 
       _nicknameRetryCount++;
       _addSystemMessage(
-        'Nickname "$_nickname" is already in use. Retrying in 2 seconds (attempt $_nicknameRetryCount/10)...',
+        '${_t('nickname_in_use')} "$_nickname" ${_t('nickname_in_use_retry')} $_nicknameRetryCount/10)...',
       );
 
       // Wait 2 seconds and retry with same nickname
@@ -192,9 +245,7 @@ class IrcService {
       final newNickname = '$_originalNickname\_';
       _nickname = newNickname;
       _nicknameRetryCount = 0; // Reset counter
-      _addSystemMessage(
-        'Nickname still in use after 10 attempts. Trying with "$newNickname"...',
-      );
+      _addSystemMessage('${_t('nickname_still_in_use')} "$newNickname"...');
       _sendRaw('NICK $newNickname');
     }
   }
@@ -241,7 +292,7 @@ class IrcService {
       case '376': // RPL_ENDOFMOTD
       case '422': // ERR_NOMOTD
         // MOTD ended, now join the channel
-        _addSystemMessage('Received end of MOTD, joining channel...');
+        _addSystemMessage(_t('received_motd'));
         joinChannel();
         break;
       case 'PRIVMSG':
@@ -254,7 +305,12 @@ class IrcService {
         _usersController.add(List.from(_channelUsers));
         // Now we're truly connected and on the channel
         _connectionStateController.add(IrcConnectionState.connected);
-        _addSystemMessage('Successfully joined channel!');
+        _addSystemMessage(_t('joined_channel'));
+        // Show list of active users
+        if (_channelUsers.isNotEmpty) {
+          final usersList = _channelUsers.join(', ');
+          _addSystemMessage('${_t('active_users')} $usersList');
+        }
         break;
       case 'JOIN':
         _handleJoin(line);
@@ -320,8 +376,10 @@ class IrcService {
       }
       // If it's our own join, request the full user list
       if (nick == _nickname) {
-        _addSystemMessage('Successfully joined $channel!');
         requestUserList();
+      } else {
+        // Inform about other users joining
+        _addSystemMessage('$nick ${_t('joined')}');
       }
     }
   }
@@ -332,6 +390,9 @@ class IrcService {
       final nick = nickMatch.group(1)!;
       _channelUsers.remove(nick);
       _usersController.add(List.from(_channelUsers));
+      // Inform about user leaving
+      final action = line.contains(' QUIT ') ? _t('quit') : _t('left');
+      _addSystemMessage('$nick $action');
     }
   }
 
