@@ -1,0 +1,44 @@
+# Flutter/Dart
+Frontend/geh_chat_frontend/.dart_tool/
+Frontend/geh_chat_frontend/.flutter-plugins
+Frontend/geh_chat_frontend/.flutter-plugins-dependencies
+Frontend/geh_chat_frontend/.packages
+Frontend/geh_chat_frontend/build/
+Frontend/geh_chat_frontend/.pub-cache/
+Frontend/geh_chat_frontend/.pub/
+
+# Android
+Frontend/geh_chat_frontend/android/.gradle/
+Frontend/geh_chat_frontend/android/captures/
+Frontend/geh_chat_frontend/android/gradlew
+Frontend/geh_chat_frontend/android/gradlew.bat
+Frontend/geh_chat_frontend/android/local.properties
+Frontend/geh_chat_frontend/android/.gradle
+Frontend/geh_chat_frontend/android/gradle/
+Frontend/geh_chat_frontend/android/app/build/
+
+# iOS
+Frontend/geh_chat_frontend/ios/Flutter/Flutter.framework
+Frontend/geh_chat_frontend/ios/Flutter/Flutter.podspec
+Frontend/geh_chat_frontend/ios/Flutter/Generated.xcconfig
+Frontend/geh_chat_frontend/ios/Flutter/ephemeral/
+Frontend/geh_chat_frontend/ios/Pods/
+Frontend/geh_chat_frontend/ios/.symlinks/
+Frontend/geh_chat_frontend/ios/Flutter/App.framework
+Frontend/geh_chat_frontend/ios/Flutter/flutter_export_environment.sh
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+*~
+
+# Misc
+*.log
+*.pyc
+*.class
+.DS_Store
