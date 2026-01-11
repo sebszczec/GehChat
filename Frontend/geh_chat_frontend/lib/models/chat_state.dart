@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/irc_service.dart';
 import '../services/notification_service.dart';
 import '../services/foreground_service_manager.dart';
@@ -21,21 +22,28 @@ class ChatState extends ChangeNotifier {
   String? _activeChat; // null = main channel, username = private chat
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
   bool _disposed = false;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _wasManuallyDisconnected = false;
+  bool _isReconnecting = false;
+  ConnectionSettings? _lastConnectionSettings;
 
   ChatState(this._ircService) {
     _ircService.messages.listen(_handleMessage);
     _ircService.users.listen(_handleUsers);
     _ircService.connectionState.listen(_handleConnectionState);
+    _startConnectivityMonitoring();
   }
 
   // Public method for auto-reconnecting with saved settings
   Future<bool> tryAutoConnect() async {
     try {
       final savedSettings = await ConnectionSettingsService.loadSettings();
-      
+
       if (savedSettings != null) {
-        debugPrint('Auto-connecting with saved settings: ${savedSettings.server}:${savedSettings.port} #${savedSettings.channel} as ${savedSettings.nickname}');
-        
+        debugPrint(
+          'Auto-connecting with saved settings: ${savedSettings.server}:${savedSettings.port} #${savedSettings.channel} as ${savedSettings.nickname}',
+        );
+
         // Connect automatically in background
         await connectWithSettings(
           server: savedSettings.server,
@@ -44,7 +52,7 @@ class ChatState extends ChangeNotifier {
           nickname: savedSettings.nickname,
           debugMode: false,
         );
-        
+
         debugPrint('Auto-connect successful!');
         return true;
       } else {
@@ -88,9 +96,10 @@ class ChatState extends ChangeNotifier {
       // Increment unread count for messages from others
       if (message.sender != _ircService.nickname) {
         // Show notification if: app is in background OR user is on different chat
-        final isAppInForeground = _appLifecycleState == AppLifecycleState.resumed;
+        final isAppInForeground =
+            _appLifecycleState == AppLifecycleState.resumed;
         final shouldNotify = !isAppInForeground || _activeChat != chatKey;
-        
+
         if (shouldNotify) {
           _unreadCounts[chatKey] = (_unreadCounts[chatKey] ?? 0) + 1;
 
@@ -110,9 +119,10 @@ class ChatState extends ChangeNotifier {
       // Show notification for channel messages from others
       // If app is in background OR user is on different chat (private chat)
       if (message.sender != _ircService.nickname) {
-        final isAppInForeground = _appLifecycleState == AppLifecycleState.resumed;
+        final isAppInForeground =
+            _appLifecycleState == AppLifecycleState.resumed;
         final shouldNotify = !isAppInForeground || _activeChat != null;
-        
+
         if (shouldNotify) {
           _notificationService.showMessageNotification(
             sender: message.sender,
@@ -139,13 +149,62 @@ class ChatState extends ChangeNotifier {
       _shouldAutoReconnect = true;
       _stopReconnectTimer();
       _notificationService.showPersistentNotification();
+      _isReconnecting = false;
     } else if (state == IrcConnectionState.disconnected ||
         state == IrcConnectionState.error) {
       _notificationService.hidePersistentNotification();
-      // Connection lost - no auto-reconnect
+      // Connection lost - connectivity monitor will handle auto-reconnect if appropriate
     }
 
     notifyListeners();
+  }
+
+  void _startConnectivityMonitoring() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) {
+      _handleConnectivityChange(results);
+    });
+  }
+
+  void _handleConnectivityChange(List<ConnectivityResult> results) {
+    final hasInternet = results.any(
+      (result) => result != ConnectivityResult.none,
+    );
+
+    debugPrint('Connectivity changed: $results, hasInternet: $hasInternet');
+
+    // If internet is back and we should reconnect
+    if (hasInternet &&
+        !_wasManuallyDisconnected &&
+        !_isReconnecting &&
+        _lastConnectionSettings != null &&
+        (_connectionState == IrcConnectionState.disconnected ||
+            _connectionState == IrcConnectionState.error)) {
+      debugPrint('Internet restored - attempting auto-reconnect...');
+      _attemptAutoReconnect();
+    }
+  }
+
+  Future<void> _attemptAutoReconnect() async {
+    if (_isReconnecting || _lastConnectionSettings == null) return;
+
+    _isReconnecting = true;
+    debugPrint('Auto-reconnecting with saved settings...');
+
+    try {
+      await connectWithSettings(
+        server: _lastConnectionSettings!.server,
+        port: _lastConnectionSettings!.port,
+        channel: _lastConnectionSettings!.channel,
+        nickname: _lastConnectionSettings!.nickname,
+        debugMode: false,
+      );
+      debugPrint('Auto-reconnect successful!');
+    } catch (e) {
+      debugPrint('Auto-reconnect failed: $e');
+      _isReconnecting = false;
+    }
   }
 
   void _startReconnectTimer() {
@@ -184,6 +243,16 @@ class ChatState extends ChangeNotifier {
     required String nickname,
     bool debugMode = false,
   }) async {
+    // Save connection settings for auto-reconnect
+    _lastConnectionSettings = ConnectionSettings(
+      server: server,
+      port: port,
+      channel: channel,
+      nickname: nickname,
+    );
+
+    // Reset manual disconnect flag - user is manually connecting
+    _wasManuallyDisconnected = false;
     _ircService.updateSettings(
       newServer: server,
       newPort: port,
@@ -238,14 +307,16 @@ class ChatState extends ChangeNotifier {
   void disconnect() {
     _shouldAutoReconnect = false;
     _wasConnected = false;
+    _wasManuallyDisconnected = true; // Mark as manual disconnect
+    _lastConnectionSettings = null; // Clear saved settings
     _stopReconnectTimer();
     _ircService.disconnect();
     _notificationService.hidePersistentNotification();
-    
+
     // Clear saved settings on manual disconnect
     ConnectionSettingsService.clearSettings();
-    debugPrint('Connection settings cleared');
-    
+    debugPrint('Connection settings cleared - manual disconnect');
+
     _channelMessages.clear();
     _privateChats.clear();
     _unreadCounts.clear();
@@ -259,6 +330,7 @@ class ChatState extends ChangeNotifier {
     _disposed = true;
     // Clean up everything when ChatState is disposed
     _stopReconnectTimer();
+    _connectivitySubscription?.cancel(); // Cancel connectivity monitoring
     _ircService.disconnect();
     _notificationService.hidePersistentNotification();
     debugPrint('ChatState disposed - app closing');

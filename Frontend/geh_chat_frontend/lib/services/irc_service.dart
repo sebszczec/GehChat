@@ -27,6 +27,9 @@ class IrcService {
   final List<String> _channelUsers = [];
   bool _isConnected = false;
   bool debugMode = false;
+  int _nicknameRetryCount = 0;
+  String? _originalNickname;
+  Timer? _nicknameRetryTimer;
 
   IrcService({String? server, int? port, String? channel})
     : server = server ?? 'slaugh.pl',
@@ -60,10 +63,10 @@ class IrcService {
       _addSystemMessage('Connecting to $server:$port...');
 
       _socket = await Socket.connect(server, port);
-      
+
       // Enable TCP keepalive to prevent connection from being killed in background
       _socket!.setOption(SocketOption.tcpNoDelay, true);
-      
+
       _isConnected = true;
       _connectionStateController.add(IrcConnectionState.joiningChannel);
       _addSystemMessage('Connected to server!');
@@ -161,6 +164,48 @@ class IrcService {
     _keepaliveTimer = null;
   }
 
+  void _handleNicknameInUse() {
+    // Cancel any existing timer to prevent multiple timers running
+    _nicknameRetryTimer?.cancel();
+    _nicknameRetryTimer = null;
+
+    if (_nicknameRetryCount < 10) {
+      // Save original nickname on first attempt
+      if (_nicknameRetryCount == 0) {
+        _originalNickname = _nickname;
+      }
+
+      _nicknameRetryCount++;
+      _addSystemMessage(
+        'Nickname "$_nickname" is already in use. Retrying in 2 seconds (attempt $_nicknameRetryCount/10)...',
+      );
+
+      // Wait 2 seconds and retry with same nickname
+      _nicknameRetryTimer = Timer(const Duration(seconds: 2), () {
+        _nicknameRetryTimer = null; // Clear timer reference after execution
+        if (_socket != null && _isConnected) {
+          _sendRaw('NICK $_originalNickname');
+        }
+      });
+    } else {
+      // After 10 failed attempts, add underscore to nickname
+      final newNickname = '$_originalNickname\_';
+      _nickname = newNickname;
+      _nicknameRetryCount = 0; // Reset counter
+      _addSystemMessage(
+        'Nickname still in use after 10 attempts. Trying with "$newNickname"...',
+      );
+      _sendRaw('NICK $newNickname');
+    }
+  }
+
+  void _stopNicknameRetryTimer() {
+    _nicknameRetryTimer?.cancel();
+    _nicknameRetryTimer = null;
+    _nicknameRetryCount = 0;
+    _originalNickname = null;
+  }
+
   void _handleServerData(List<int> data) {
     final message = utf8.decode(data).trim();
     final lines = message.split('\r\n');
@@ -190,6 +235,9 @@ class IrcService {
     final command = parts[1];
 
     switch (command) {
+      case '433': // ERR_NICKNAMEINUSE
+        _handleNicknameInUse();
+        break;
       case '376': // RPL_ENDOFMOTD
       case '422': // ERR_NOMOTD
         // MOTD ended, now join the channel
@@ -356,6 +404,7 @@ class IrcService {
   void disconnect() {
     if (_isConnected) {
       _stopKeepaliveTimer();
+      _stopNicknameRetryTimer();
       _sendRaw('QUIT :Goodbye!');
       _socket?.close();
       _isConnected = false;
@@ -391,4 +440,10 @@ class IrcMessage {
   });
 }
 
-enum IrcConnectionState { disconnected, connecting, joiningChannel, connected, error }
+enum IrcConnectionState {
+  disconnected,
+  connecting,
+  joiningChannel,
+  connected,
+  error,
+}
