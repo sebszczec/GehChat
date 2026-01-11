@@ -104,4 +104,14 @@ class ConnectionSettingsService {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_keyShouldAutoConnect) ?? false;
   }
-}
+  /// Save last used nickname separately (persists even after clearing full settings)
+  static Future<void> saveLastNickname(String nickname) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyNickname, nickname);
+  }
+
+  /// Load last used nickname
+  static Future<String?> loadLastNickname() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyNickname);
+  }}

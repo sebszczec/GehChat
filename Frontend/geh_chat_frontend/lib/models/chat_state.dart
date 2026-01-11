@@ -20,6 +20,7 @@ class ChatState extends ChangeNotifier {
   bool _wasConnected = false;
   String? _activeChat; // null = main channel, username = private chat
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
+  bool _disposed = false;
 
   ChatState(this._ircService) {
     _ircService.messages.listen(_handleMessage);
@@ -222,7 +223,12 @@ class ChatState extends ChangeNotifier {
     if (chat != null) {
       _unreadCounts[chat] = 0;
     }
-    notifyListeners();
+    // Use scheduleMicrotask to avoid calling notifyListeners during widget disposal
+    Future.microtask(() {
+      if (!_disposed) {
+        notifyListeners();
+      }
+    });
   }
 
   int getUnreadChatsCount() {
@@ -249,6 +255,8 @@ class ChatState extends ChangeNotifier {
 
   @override
   void dispose() {
+    // Mark as disposed to prevent further notifyListeners calls
+    _disposed = true;
     // Clean up everything when ChatState is disposed
     _stopReconnectTimer();
     _ircService.disconnect();

@@ -51,8 +51,14 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       _channelController.text = savedSettings.channel;
       _nicknameController.text = savedSettings.nickname;
     } else {
-      // Generate random nickname if no saved settings
-      _nicknameController.text = chatState.generateRandomNickname();
+      // If no full settings, still try to load last used nickname
+      final lastNickname = await ConnectionSettingsService.loadLastNickname();
+      if (lastNickname != null && lastNickname.isNotEmpty) {
+        _nicknameController.text = lastNickname;
+      } else {
+        // Generate random nickname only if no nickname was ever saved
+        _nicknameController.text = chatState.generateRandomNickname();
+      }
     }
   }
 
@@ -135,6 +141,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           nickname: nickname,
         ),
       );
+      
+      // Also save nickname separately so it persists even if other settings are cleared
+      await ConnectionSettingsService.saveLastNickname(nickname);
 
       if (mounted) {
         Navigator.pushReplacement(

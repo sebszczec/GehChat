@@ -26,6 +26,7 @@ class _MainChatScreenState extends State<MainChatScreen>
   bool _hasNewMessages = false;
   int _previousMessageCount = 0;
   late AnimationController _blinkController;
+  ChatState? _chatState;
 
   @override
   void initState() {
@@ -37,18 +38,28 @@ class _MainChatScreenState extends State<MainChatScreen>
     _scrollController.addListener(_scrollListener);
     // Schedule initial scroll after first build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final chatState = context.read<ChatState>();
-      _previousMessageCount = chatState.channelMessages.length;
-      // Set main channel as active chat
-      chatState.setActiveChat(null);
+      if (mounted) {
+        final chatState = context.read<ChatState>();
+        _previousMessageCount = chatState.channelMessages.length;
+        // Set main channel as active chat
+        chatState.setActiveChat(null);
+      }
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Save reference to ChatState for safe access in dispose()
+    _chatState = context.read<ChatState>();
+  }
+
+  @override
   void dispose() {
-    // Clear active chat when leaving
-    final chatState = context.read<ChatState>();
-    chatState.setActiveChat(null);
+    // Clear active chat when leaving - using saved reference
+    if (_chatState != null) {
+      _chatState!.setActiveChat(null);
+    }
     _messageController.dispose();
     _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
