@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../services/websocket_irc_service.dart';
+import '../services/irc_service.dart';
 import '../services/notification_service.dart';
 import '../services/connection_settings_service.dart';
 

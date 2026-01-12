@@ -10,13 +10,20 @@ import asyncio
 import json
 import socket
 from typing import Optional
+from config import get_irc_config, BACKEND_HOST, BACKEND_PORT
 
-# Configure logging
+# Configure logging - DEBUG level to log everything
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Log levels:
+# DEBUG - Detailed information for diagnosing problems
+# INFO - General informational messages
+# WARNING - Warning messages for potentially harmful situations
+# ERROR - Error messages for serious problems
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -39,9 +46,11 @@ class IRCBridge:
     def __init__(self):
         self.irc_socket: Optional[socket.socket] = None
         self.websocket: Optional[WebSocket] = None
-        self.server = "slaugh.pl"
-        self.port = 6667
-        self.channel = "#vorest"
+        # Load IRC config from config file
+        irc_config = get_irc_config()
+        self.server = irc_config.server
+        self.port = irc_config.port
+        self.channel = irc_config.channel
         self.nickname = None
         self.connected = False
         self.reader_task = None
@@ -55,16 +64,22 @@ class IRCBridge:
             self.nickname = nickname
             
             logger.info(f"Connecting to IRC: {server}:{port}")
+            logger.debug(f"IRC connection params - Server: {server}, Port: {port}, Channel: {channel}, Nickname: {nickname}")
             
             # Create socket connection
+            logger.debug("Creating IRC socket connection...")
             self.irc_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.irc_socket.settimeout(30)
+            logger.debug(f"Connecting to {server}:{port}...")
             self.irc_socket.connect((server, port))
             self.irc_socket.setblocking(False)
+            logger.debug("IRC socket connected and set to non-blocking mode")
             
             # Send IRC handshake
+            logger.debug(f"Sending IRC handshake for nickname: {nickname}")
             self._send_irc(f"NICK {nickname}")
             self._send_irc(f"USER {nickname} 0 * :{nickname}")
+            logger.debug("IRC handshake sent")
             
             self.connected = True
             
@@ -80,6 +95,7 @@ class IRCBridge:
             
         except Exception as e:
             logger.error(f"IRC connection error: {e}")
+            logger.debug(f"IRC connection error details - Server: {server}, Port: {port}", exc_info=True)
             await self._send_to_client({
                 "type": "error",
                 "content": f"Failed to connect to IRC: {str(e)}"
@@ -97,6 +113,7 @@ class IRCBridge:
     
     async def _read_from_irc(self):
         """Read messages from IRC server"""
+        logger.debug("Starting IRC reader task")
         buffer = ""
         while self.connected and self.irc_socket:
             try:
@@ -116,6 +133,7 @@ class IRCBridge:
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logger.error(f"Error reading from IRC: {e}")
+                logger.warning("IRC reader loop interrupted due to error")
                 break
         
         logger.info("IRC reader task ended")
@@ -201,29 +219,43 @@ class IRCBridge:
     
     async def _send_to_client(self, data: dict):
         """Send data to WebSocket client"""
+        logger.debug(f"Sending to client: {data.get('type', 'unknown')} message")
         if self.websocket:
             try:
                 await self.websocket.send_json(data)
+                logger.debug(f"Successfully sent {data.get('type')} to client")
             except Exception as e:
                 logger.error(f"Error sending to client: {e}")
+                logger.warning("Failed to send message to WebSocket client")
     
     async def handle_client_message(self, data: dict):
         """Handle message from WebSocket client"""
+        logger.debug(f"Handling client message: {data}")
         msg_type = data.get('type')
+        logger.debug(f"Message type: {msg_type}")
         
         if msg_type == 'connect':
-            server = data.get('server', 'slaugh.pl')
-            port = int(data.get('port', 6667))
-            channel = data.get('channel', '#vorest')
+            # IRC server configuration comes from config.py, NOT from client
+            irc_config = get_irc_config()
+            server = irc_config.server
+            port = irc_config.port
+            channel = irc_config.channel
+            
+            # Only nickname comes from client
             nickname = data.get('nickname', 'GehUser')
+            
+            logger.info(f"Client requested connection with nickname: {nickname}")
+            logger.debug(f"Using IRC config - Server: {server}, Port: {port}, Channel: {channel}")
             
             await self.connect_to_irc(server, port, channel, nickname)
             
         elif msg_type == 'message':
             target = data.get('target', self.channel)
             content = data.get('content', '')
+            logger.debug(f"Message request - Target: {target}, Content length: {len(content) if content else 0}")
             
             if self.connected:
+                logger.debug(f"Sending PRIVMSG to {target}")
                 self._send_irc(f"PRIVMSG {target} :{content}")
                 # Echo back to client
                 await self._send_to_client({
@@ -235,6 +267,7 @@ class IRCBridge:
                 })
             
         elif msg_type == 'disconnect':
+            logger.info(f"Client {self.nickname} requested disconnect")
             await self.disconnect()
     
     async def disconnect(self):
@@ -282,10 +315,22 @@ async def health_check():
     }
 
 
+@app.get("/api/irc-config")
+async def get_irc_server_config():
+    """Get IRC server configuration for clients"""
+    irc_config = get_irc_config()
+    return {
+        "server": irc_config.server,
+        "port": irc_config.port,
+        "channel": irc_config.channel
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for IRC bridge"""
     await websocket.accept()
+    logger.debug(f"WebSocket connection accepted from {websocket.client}")
     
     # Create IRC bridge for this connection
     bridge = IRCBridge()
@@ -293,6 +338,7 @@ async def websocket_endpoint(websocket: WebSocket):
     bridges[websocket] = bridge
     
     logger.info(f"New WebSocket connection. Total: {len(bridges)}")
+    logger.debug(f"Created new IRC bridge for WebSocket connection")
     
     await websocket.send_json({
         "type": "connected",
@@ -309,8 +355,10 @@ async def websocket_endpoint(websocket: WebSocket):
             
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
+        logger.warning("Client disconnected from WebSocket")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+        logger.debug("WebSocket exception details", exc_info=True)
     finally:
         # Cleanup
         await bridge.disconnect()
@@ -320,11 +368,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 if __name__ == "__main__":
+    irc_config = get_irc_config()
     logger.info("Starting GehChat Backend Server...")
+    logger.info(f"IRC Server: {irc_config.server}:{irc_config.port}, Channel: {irc_config.channel}")
+    logger.info(f"Backend listening on {BACKEND_HOST}:{BACKEND_PORT}")
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=BACKEND_HOST,
+        port=BACKEND_PORT,
         reload=True,
         log_level="info"
     )

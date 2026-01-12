@@ -45,6 +45,8 @@ abstract class AppLocalizations {
   String get channelHint;
   String get systemMessages;
   String get noSystemMessages;
+  String get backendServer;
+  String get backendPort;
 }
 
 class AppLocalizationsEn extends AppLocalizations {
@@ -169,6 +171,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noSystemMessages => 'No system messages';
+
+  @override
+  String get backendServer => 'Backend Server';
+
+  @override
+  String get backendPort => 'Backend Port';
 }
 
 // Polish localization ready to be implemented
@@ -294,6 +302,12 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get noSystemMessages => 'Brak wiadomości systemowych';
+
+  @override
+  String get backendServer => 'Serwer backend';
+
+  @override
+  String get backendPort => 'Port backend';
 }
 
 class AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

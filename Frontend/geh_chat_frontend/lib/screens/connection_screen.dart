@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../models/chat_state.dart';
 import '../l10n/app_localizations.dart';
 import '../services/connection_settings_service.dart';
+import '../config/backend_config.dart';
 import 'main_chat_screen.dart';
 
 class ConnectionScreen extends StatefulWidget {
@@ -15,13 +17,10 @@ class ConnectionScreen extends StatefulWidget {
 
 class _ConnectionScreenState extends State<ConnectionScreen> {
   final TextEditingController _serverController = TextEditingController(
-    text: 'localhost',
+    text: BackendConfig.defaultHost,
   );
   final TextEditingController _portController = TextEditingController(
-    text: '8000',
-  );
-  final TextEditingController _channelController = TextEditingController(
-    text: '#vorest',
+    text: BackendConfig.defaultPort.toString(),
   );
   final TextEditingController _nicknameController = TextEditingController();
   bool _isConnecting = false;
@@ -37,17 +36,16 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   // Load saved settings to show in UI
   Future<void> _checkConnectionAndNavigate() async {
     if (!mounted) return;
-    
+
     final chatState = context.read<ChatState>();
-    
+
     // Load saved settings to show in UI (but never auto-connect)
     final savedSettings = await ConnectionSettingsService.loadSettings();
-    
+
     if (savedSettings != null) {
       // Populate fields with saved settings (user must click Connect manually)
       _serverController.text = savedSettings.server;
       _portController.text = savedSettings.port.toString();
-      _channelController.text = savedSettings.channel;
       _nicknameController.text = savedSettings.nickname;
     } else {
       // If no full settings, still try to load last used nickname
@@ -65,7 +63,6 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   void dispose() {
     _serverController.dispose();
     _portController.dispose();
-    _channelController.dispose();
     _nicknameController.dispose();
     super.dispose();
   }
@@ -78,13 +75,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
     final server = _serverController.text.trim();
     final portStr = _portController.text.trim();
-    final channel = _channelController.text.trim();
     final nickname = _nicknameController.text.trim();
 
-    if (server.isEmpty ||
-        portStr.isEmpty ||
-        channel.isEmpty ||
-        nickname.isEmpty) {
+    if (server.isEmpty || portStr.isEmpty || nickname.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(AppLocalizations.of(context).pleaseFillAllFields),
@@ -110,6 +103,35 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     });
 
     try {
+      // Fetch IRC configuration from backend
+      String channel;
+      try {
+        final ircConfigUrl = BackendConfig.getIrcConfigUrl(server, port);
+        final response = await http.get(Uri.parse(ircConfigUrl));
+
+        if (response.statusCode == 200) {
+          final config = json.decode(response.body);
+          channel = config['channel'] ?? '#vorest';
+        } else {
+          throw Exception('Failed to fetch IRC config: ${response.statusCode}');
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cannot connect to backend: $e'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        setState(() {
+          _isConnecting = false;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+
       final chatState = context.read<ChatState>();
       await chatState.connectWithSettings(
         server: server,
@@ -128,7 +150,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           nickname: nickname,
         ),
       );
-      
+
       // Also save nickname separately so it persists even if other settings are cleared
       await ConnectionSettingsService.saveLastNickname(nickname);
 
@@ -201,9 +223,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 TextField(
                   controller: _serverController,
                   decoration: InputDecoration(
-                    labelText: loc.server,
+                    labelText: loc.backendServer,
                     prefixIcon: const Icon(Icons.dns),
                     border: const OutlineInputBorder(),
+                    hintText: 'localhost',
                   ),
                   enabled: !_isConnecting,
                 ),
@@ -211,22 +234,12 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 TextField(
                   controller: _portController,
                   decoration: InputDecoration(
-                    labelText: loc.port,
+                    labelText: loc.backendPort,
                     prefixIcon: const Icon(Icons.numbers),
                     border: const OutlineInputBorder(),
+                    hintText: '8000',
                   ),
                   keyboardType: TextInputType.number,
-                  enabled: !_isConnecting,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _channelController,
-                  decoration: InputDecoration(
-                    labelText: loc.channel,
-                    prefixIcon: const Icon(Icons.tag),
-                    border: const OutlineInputBorder(),
-                    hintText: loc.channelHint,
-                  ),
                   enabled: !_isConnecting,
                 ),
                 const SizedBox(height: 16),

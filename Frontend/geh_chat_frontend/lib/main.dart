@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
-import 'services/websocket_irc_service.dart';
+import 'services/irc_service.dart';
 import 'services/notification_service.dart';
 import 'services/battery_optimization_service.dart';
 import 'models/chat_state.dart';
@@ -29,7 +29,7 @@ void main() async {
   // Set up notification tap handler
   notificationService.onNotificationTap = (username, isPrivate) {
     debugPrint('Notification tapped: username=$username, isPrivate=$isPrivate');
-    
+
     final context = navigatorKey.currentContext;
     if (context == null) {
       debugPrint('No context available for notification tap');
@@ -56,7 +56,7 @@ void main() async {
         } else {
           // Navigate to main chat screen
           debugPrint('Navigating to main chat');
-          
+
           // Check if we're already on main chat
           bool isOnMainChat = false;
           navigator.popUntil((route) {
@@ -68,7 +68,8 @@ void main() async {
 
           if (!isOnMainChat) {
             // Push or replace with main chat
-            if (_globalChatState?.connectionState == IrcConnectionState.connected) {
+            if (_globalChatState?.connectionState ==
+                IrcConnectionState.connected) {
               debugPrint('Connected - navigating to MainChatScreen');
               navigator.pushAndRemoveUntil(
                 MaterialPageRoute(
@@ -78,7 +79,9 @@ void main() async {
                 (route) => false, // Remove all previous routes
               );
             } else {
-              debugPrint('Not connected - connection state: ${_globalChatState?.connectionState}');
+              debugPrint(
+                'Not connected - connection state: ${_globalChatState?.connectionState}',
+              );
             }
           }
         }

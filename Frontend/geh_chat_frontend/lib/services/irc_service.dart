@@ -1,16 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class IrcService {
-  Socket? _socket;
+  WebSocketChannel? _channel;
   Timer? _keepaliveTimer;
   String server;
   int port;
   String? _nickname;
   String channel;
+
+  // Backend WebSocket URL
+  String backendUrl;
 
   final StreamController<IrcMessage> _messageController =
       StreamController<IrcMessage>.broadcast();
@@ -27,31 +30,15 @@ class IrcService {
   final List<String> _channelUsers = [];
   bool _isConnected = false;
   bool debugMode = false;
-  int _nicknameRetryCount = 0;
-  String? _originalNickname;
-  Timer? _nicknameRetryTimer;
 
   // Translation maps for system messages
   static final Map<String, Map<String, String>> _translations = {
-    'connecting': {'en': 'Connecting to', 'pl': 'Łączenie z'},
+    'connecting': {'en': 'Connecting to backend', 'pl': 'Łączenie z backendem'},
     'connected': {'en': 'Connected to server!', 'pl': 'Połączono z serwerem!'},
     'using_nickname': {'en': 'Using nickname:', 'pl': 'Używany nick:'},
     'sent_auth': {
-      'en': 'Sent authentication to server...',
-      'pl': 'Wysłano autoryzację do serwera...',
-    },
-    'nickname_in_use': {'en': 'Nickname', 'pl': 'Nick'},
-    'nickname_in_use_retry': {
-      'en': 'is already in use. Retrying in 2 seconds (attempt',
-      'pl': 'jest już zajęty. Ponowna próba za 2 sekundy (próba',
-    },
-    'nickname_still_in_use': {
-      'en': 'Nickname still in use after 10 attempts. Trying with',
-      'pl': 'Nick nadal zajęty po 10 próbach. Próbuję z',
-    },
-    'received_motd': {
-      'en': 'Received end of MOTD, joining channel...',
-      'pl': 'Otrzymano koniec MOTD, dołączanie do kanału...',
+      'en': 'Connecting to IRC server...',
+      'pl': 'Łączenie z serwerem IRC...',
     },
     'joining_channel': {'en': 'Joining channel', 'pl': 'Dołączanie do kanału'},
     'joined_channel': {
@@ -72,16 +59,17 @@ class IrcService {
     },
   };
 
-  IrcService({String? server, int? port, String? channel})
+  IrcService({String? server, int? port, String? channel, String? backendUrl})
     : server = server ?? 'slaugh.pl',
       port = port ?? 6667,
-      channel = channel ?? '#vorest';
+      channel = channel ?? '#vorest',
+      backendUrl = backendUrl ?? 'ws://localhost:8000/ws';
 
   String get nickname => _nickname ?? '';
 
   // Get translated message
   String _t(String key, {String? suffix}) {
-    final locale = Platform.localeName.toLowerCase();
+    final locale = kIsWeb ? 'en' : Platform.localeName.toLowerCase();
     final isPolish = locale.startsWith('pl');
     final lang = isPolish ? 'pl' : 'en';
     final translation =
@@ -111,32 +99,21 @@ class IrcService {
   Future<void> connect({String? customNickname}) async {
     try {
       _connectionStateController.add(IrcConnectionState.connecting);
-      _addSystemMessage('${_t('connecting')} $server:$port...');
+      _addSystemMessage('${_t('connecting')} $backendUrl...');
 
-      _socket = await Socket.connect(server, port);
-
-      // Enable TCP keepalive to prevent connection from being killed in background
-      _socket!.setOption(SocketOption.tcpNoDelay, true);
+      // Connect to backend WebSocket
+      _channel = WebSocketChannel.connect(Uri.parse(backendUrl));
 
       _isConnected = true;
       _connectionStateController.add(IrcConnectionState.joiningChannel);
-      _addSystemMessage(_t('connected'));
 
-      // Start keepalive timer - send PING every 30 seconds
-      _startKeepaliveTimer();
-
-      // Generate random friendly nickname if not provided
+      // Generate nickname
       _nickname = customNickname ?? _generateFriendlyNickname();
       _addSystemMessage('${_t('using_nickname')} $_nickname');
 
-      // Send IRC handshake
-      _sendRaw('NICK $_nickname');
-      _sendRaw('USER $_nickname 0 * :$_nickname');
-      _addSystemMessage(_t('sent_auth'));
-
-      // Listen to server messages
-      _socket!.listen(
-        _handleServerData,
+      // Listen to backend messages
+      _channel!.stream.listen(
+        _handleBackendMessage,
         onError: (error) {
           _isConnected = false;
           _addSystemMessage(_t('connection_error'));
@@ -150,18 +127,110 @@ class IrcService {
         },
       );
 
-      // Channel join will happen after MOTD ends (376 or 422)
+      // Send connect command to backend
+      // Only nickname is sent - IRC server config comes from backend
+      _sendToBackend({'type': 'connect', 'nickname': _nickname});
+
+      _addSystemMessage(_t('sent_auth'));
     } catch (e) {
       _isConnected = false;
       _connectionStateController.add(IrcConnectionState.error);
+      _addSystemMessage('Connection failed: $e');
       rethrow;
     }
   }
 
-  void joinChannel() {
-    if (_isConnected) {
-      _addSystemMessage('${_t('joining_channel')} $channel...');
-      _sendRaw('JOIN $channel');
+  void _handleBackendMessage(dynamic data) {
+    try {
+      final message = jsonDecode(data);
+      final type = message['type'];
+
+      if (debugMode) {
+        _addSystemMessage('[RECV] $type: ${message['content'] ?? ''}');
+      }
+
+      switch (type) {
+        case 'connected':
+          _addSystemMessage(message['content'] ?? 'Connected to backend');
+          break;
+
+        case 'system':
+          _addSystemMessage(message['content'] ?? '');
+          break;
+
+        case 'message':
+          _messageController.add(
+            IrcMessage(
+              sender: message['sender'] ?? 'Unknown',
+              content: message['content'] ?? '',
+              target: message['target'] ?? channel,
+              timestamp: DateTime.now(),
+              isPrivate: message['is_private'] ?? false,
+            ),
+          );
+          break;
+
+        case 'users':
+          final users = (message['users'] as List?)?.cast<String>() ?? [];
+          _channelUsers.clear();
+          _channelUsers.addAll(users);
+          _usersController.add(List.from(_channelUsers));
+
+          if (users.isNotEmpty) {
+            final usersList = users.join(', ');
+            _addSystemMessage('${_t('active_users')} $usersList');
+          }
+
+          // Mark as fully connected
+          _connectionStateController.add(IrcConnectionState.connected);
+          _addSystemMessage(_t('joined_channel'));
+          break;
+
+        case 'join':
+          final user = message['user'];
+          if (user != null && !_channelUsers.contains(user)) {
+            _channelUsers.add(user);
+            _usersController.add(List.from(_channelUsers));
+            _addSystemMessage('$user ${_t('joined')}');
+          }
+          break;
+
+        case 'part':
+        case 'quit':
+          final user = message['user'];
+          if (user != null) {
+            _channelUsers.remove(user);
+            _usersController.add(List.from(_channelUsers));
+            final action = type == 'part' ? _t('left') : _t('quit');
+            _addSystemMessage('$user $action');
+          }
+          break;
+
+        case 'error':
+          _addSystemMessage('Error: ${message['content']}');
+          break;
+
+        case 'disconnected':
+          _isConnected = false;
+          _connectionStateController.add(IrcConnectionState.disconnected);
+          _addSystemMessage(_t('disconnected'));
+          break;
+      }
+    } catch (e) {
+      debugPrint('Error handling backend message: $e');
+    }
+  }
+
+  void _sendToBackend(Map<String, dynamic> data) {
+    if (_channel != null && _isConnected) {
+      try {
+        _channel!.sink.add(jsonEncode(data));
+        if (debugMode) {
+          _addSystemMessage('[SEND] ${data['type']}: ${data['content'] ?? ''}');
+        }
+      } catch (e) {
+        debugPrint('Error sending to backend: $e');
+      }
     }
   }
 
@@ -169,18 +238,12 @@ class IrcService {
     if (!_isConnected) return;
 
     final recipient = target ?? channel;
-    _sendRaw('PRIVMSG $recipient :$message');
 
-    // Add own message to stream
-    _messageController.add(
-      IrcMessage(
-        sender: _nickname!,
-        content: message,
-        target: recipient,
-        timestamp: DateTime.now(),
-        isPrivate: target != null && target != channel,
-      ),
-    );
+    _sendToBackend({
+      'type': 'message',
+      'target': recipient,
+      'content': message,
+    });
   }
 
   void sendPrivateMessage(String recipient, String message) {
@@ -188,25 +251,29 @@ class IrcService {
   }
 
   void requestUserList() {
-    if (_isConnected) {
-      _sendRaw('NAMES $channel');
-    }
+    // User list is automatically received from backend
   }
 
-  void _sendRaw(String message) {
-    if (_socket != null) {
-      _socket!.write('$message\r\n');
-      if (debugMode) {
-        _addSystemMessage('[SEND] $message');
-      }
-    }
+  void disconnect() {
+    if (!_isConnected) return;
+
+    _sendToBackend({'type': 'disconnect'});
+
+    _stopKeepaliveTimer();
+    _channel?.sink.close();
+    _channel = null;
+    _isConnected = false;
+    _channelUsers.clear();
+    _usersController.add([]);
+    _connectionStateController.add(IrcConnectionState.disconnected);
+    _addSystemMessage(_t('disconnected'));
   }
 
   void _startKeepaliveTimer() {
     _stopKeepaliveTimer();
     _keepaliveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_isConnected && _socket != null) {
-        _sendRaw('PING :keepalive');
+      if (_isConnected && _channel != null) {
+        _sendToBackend({'type': 'ping'});
         debugPrint('Sent keepalive PING');
       }
     });
@@ -217,225 +284,17 @@ class IrcService {
     _keepaliveTimer = null;
   }
 
-  void _handleNicknameInUse() {
-    // Cancel any existing timer to prevent multiple timers running
-    _nicknameRetryTimer?.cancel();
-    _nicknameRetryTimer = null;
-
-    if (_nicknameRetryCount < 10) {
-      // Save original nickname on first attempt
-      if (_nicknameRetryCount == 0) {
-        _originalNickname = _nickname;
-      }
-
-      _nicknameRetryCount++;
-      _addSystemMessage(
-        '${_t('nickname_in_use')} "$_nickname" ${_t('nickname_in_use_retry')} $_nicknameRetryCount/10)...',
-      );
-
-      // Wait 2 seconds and retry with same nickname
-      _nicknameRetryTimer = Timer(const Duration(seconds: 2), () {
-        _nicknameRetryTimer = null; // Clear timer reference after execution
-        if (_socket != null && _isConnected) {
-          _sendRaw('NICK $_originalNickname');
-        }
-      });
-    } else {
-      // After 10 failed attempts, add underscore to nickname
-      final newNickname = '${_originalNickname}_';
-      _nickname = newNickname;
-      _nicknameRetryCount = 0; // Reset counter
-      _addSystemMessage('${_t('nickname_still_in_use')} "$newNickname"...');
-      _sendRaw('NICK $newNickname');
-    }
-  }
-
-  void _stopNicknameRetryTimer() {
-    _nicknameRetryTimer?.cancel();
-    _nicknameRetryTimer = null;
-    _nicknameRetryCount = 0;
-    _originalNickname = null;
-  }
-
-  void _handleServerData(List<int> data) {
-    final message = utf8.decode(data).trim();
-    final lines = message.split('\r\n');
-
-    for (var line in lines) {
-      if (line.isEmpty) continue;
-      _processIrcLine(line);
-    }
-  }
-
-  void _processIrcLine(String line) {
-    if (debugMode) {
-      _addSystemMessage('[RECV] $line');
-    }
-
-    // Handle PING
-    if (line.startsWith('PING')) {
-      final server = line.substring(5);
-      _sendRaw('PONG $server');
-      return;
-    }
-
-    // Parse IRC message
-    final parts = line.split(' ');
-    if (parts.length < 2) return;
-
-    final command = parts[1];
-
-    switch (command) {
-      case '433': // ERR_NICKNAMEINUSE
-        _handleNicknameInUse();
-        break;
-      case '376': // RPL_ENDOFMOTD
-      case '422': // ERR_NOMOTD
-        // MOTD ended, now join the channel
-        _addSystemMessage(_t('received_motd'));
-        joinChannel();
-        break;
-      case 'PRIVMSG':
-        _handlePrivMsg(line);
-        break;
-      case '353': // NAMES reply
-        _handleNamesReply(line);
-        break;
-      case '366': // End of NAMES
-        _usersController.add(List.from(_channelUsers));
-        // Now we're truly connected and on the channel
-        _connectionStateController.add(IrcConnectionState.connected);
-        _addSystemMessage(_t('joined_channel'));
-        // Show list of active users
-        if (_channelUsers.isNotEmpty) {
-          final usersList = _channelUsers.join(', ');
-          _addSystemMessage('${_t('active_users')} $usersList');
-        }
-        break;
-      case 'JOIN':
-        _handleJoin(line);
-        break;
-      case 'PART':
-      case 'QUIT':
-        _handlePartOrQuit(line);
-        break;
-      case 'NICK':
-        _handleNickChange(line);
-        break;
-    }
-  }
-
-  void _handlePrivMsg(String line) {
-    // Format: :nick!user@host PRIVMSG target :message
-    final senderMatch = RegExp(r'^:([^!]+)').firstMatch(line);
-    if (senderMatch == null) return;
-
-    final sender = senderMatch.group(1)!;
-    final parts = line.split(' ');
-    if (parts.length < 4) return;
-
-    final target = parts[2];
-    final messageStart = line.indexOf(':', 1) + 1;
-    if (messageStart <= 0 || messageStart >= line.length) return;
-
-    final content = line.substring(messageStart);
-    final isPrivate = target == _nickname;
-
-    _messageController.add(
-      IrcMessage(
-        sender: sender,
-        content: content,
-        target: isPrivate ? sender : target,
-        timestamp: DateTime.now(),
-        isPrivate: isPrivate,
-      ),
-    );
-  }
-
-  void _handleNamesReply(String line) {
-    // Format: :server 353 nick = #channel :nick1 nick2 nick3
-    final parts = line.split(':');
-    if (parts.length < 3) return;
-
-    final users = parts[2].split(' ');
-    for (var user in users) {
-      final cleanUser = user.replaceAll(RegExp(r'^[@+]'), '').trim();
-      if (cleanUser.isNotEmpty && !_channelUsers.contains(cleanUser)) {
-        _channelUsers.add(cleanUser);
-      }
-    }
-  }
-
-  void _handleJoin(String line) {
-    final nickMatch = RegExp(r'^:([^!]+)').firstMatch(line);
-    if (nickMatch != null) {
-      final nick = nickMatch.group(1)!;
-      if (!_channelUsers.contains(nick)) {
-        _channelUsers.add(nick);
-        _usersController.add(List.from(_channelUsers));
-      }
-      // If it's our own join, request the full user list
-      if (nick == _nickname) {
-        requestUserList();
-      } else {
-        // Inform about other users joining
-        _addSystemMessage('$nick ${_t('joined')}');
-      }
-    }
-  }
-
-  void _handlePartOrQuit(String line) {
-    final nickMatch = RegExp(r'^:([^!]+)').firstMatch(line);
-    if (nickMatch != null) {
-      final nick = nickMatch.group(1)!;
-      _channelUsers.remove(nick);
-      _usersController.add(List.from(_channelUsers));
-      // Inform about user leaving
-      final action = line.contains(' QUIT ') ? _t('quit') : _t('left');
-      _addSystemMessage('$nick $action');
-    }
-  }
-
-  void _handleNickChange(String line) {
-    // Format: :oldnick!user@host NICK :newnick
-    final oldNickMatch = RegExp(r'^:([^!]+)').firstMatch(line);
-    final newNickMatch = RegExp(r'NICK :(.+)').firstMatch(line);
-
-    if (oldNickMatch != null && newNickMatch != null) {
-      final oldNick = oldNickMatch.group(1)!;
-      final newNick = newNickMatch.group(1)!;
-
-      final index = _channelUsers.indexOf(oldNick);
-      if (index != -1) {
-        _channelUsers[index] = newNick;
-        _usersController.add(List.from(_channelUsers));
-      }
-    }
-  }
-
-  String generateRandomNickname() {
-    return _generateFriendlyNickname();
-  }
-
   String _generateFriendlyNickname() {
     final adjectives = [
       'Happy',
-      'Sunny',
-      'Bright',
       'Swift',
+      'Brave',
       'Clever',
       'Gentle',
-      'Brave',
-      'Calm',
-      'Lucky',
-      'Wise',
       'Noble',
+      'Wise',
       'Kind',
-      'Bold',
-      'Quick',
-      'Smart',
     ];
-
     final nouns = [
       'Fox',
       'Wolf',
@@ -445,38 +304,23 @@ class IrcService {
       'Tiger',
       'Hawk',
       'Owl',
-      'Panda',
-      'Deer',
-      'Falcon',
-      'Raven',
-      'Dragon',
-      'Phoenix',
-      'Lynx',
     ];
 
-    final random = Random();
-    final adjective = adjectives[random.nextInt(adjectives.length)];
-    final noun = nouns[random.nextInt(nouns.length)];
-    final number = random.nextInt(1000);
+    final random = DateTime.now().millisecondsSinceEpoch;
+    final adj = adjectives[random % adjectives.length];
+    final noun = nouns[(random ~/ adjectives.length) % nouns.length];
+    final num = (random % 1000).toString().padLeft(3, '0');
 
-    return '$adjective$noun$number';
+    return '$adj$noun$num';
   }
 
-  void disconnect() {
-    if (_isConnected) {
-      _stopKeepaliveTimer();
-      _stopNicknameRetryTimer();
-      _sendRaw('QUIT :Goodbye!');
-      _socket?.close();
-      _isConnected = false;
-      _channelUsers.clear();
-      _connectionStateController.add(IrcConnectionState.disconnected);
-    }
+  String generateRandomNickname() {
+    return _generateFriendlyNickname();
   }
 
   void dispose() {
-    _stopKeepaliveTimer();
     disconnect();
+    _stopKeepaliveTimer();
     _messageController.close();
     _usersController.close();
     _connectionStateController.close();
@@ -496,7 +340,7 @@ class IrcMessage {
     required this.content,
     required this.target,
     required this.timestamp,
-    required this.isPrivate,
+    this.isPrivate = false,
     this.isSystem = false,
   });
 }
