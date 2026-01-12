@@ -242,7 +242,7 @@ class IrcService {
       });
     } else {
       // After 10 failed attempts, add underscore to nickname
-      final newNickname = '$_originalNickname\_';
+      final newNickname = '${_originalNickname}_';
       _nickname = newNickname;
       _nicknameRetryCount = 0; // Reset counter
       _addSystemMessage('${_t('nickname_still_in_use')} "$newNickname"...');

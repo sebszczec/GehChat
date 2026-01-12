@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:provider/provider.dart';
 import '../models/chat_state.dart';
-import '../services/irc_service.dart';
 import '../l10n/app_localizations.dart';
 import '../services/connection_settings_service.dart';
 import 'main_chat_screen.dart';

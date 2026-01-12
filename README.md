@@ -1,78 +1,140 @@
 # GehChat
 
-Flutter IRC chat client for Android with Material Design 3.
+Kompletna aplikacja czatu IRC z backendem Python i frontendem Flutter.
 
-## Features
-
-- 📱 IRC connection with manual connect/disconnect
-- 💬 Main channel chat and private messages
-- 🔔 Push notifications for messages
-- 💾 Connection settings persistence
-- 🎨 Material Design 3 UI with dark theme support
-- 📲 Clean foreground-only operation (no background services)
-
-## Architecture
-
-- **Frontend**: Flutter (Dart)
-- **State Management**: Provider
-- **Notifications**: flutter_local_notifications
-- **Persistence**: shared_preferences
-
-## Getting Started
-
-### Prerequisites
-
-- Flutter SDK 3.10.7 or higher
-- Android SDK for Android builds
-- Dart 3.0.0 or higher
-
-### Installation
-
-1. Clone the repository
-```bash
-git clone https://github.com/sebszczec/GehChat.git
-cd GehChat/Frontend/geh_chat_frontend
-```
-
-2. Install dependencies
-```bash
-flutter pub get
-```
-
-3. Run the app
-```bash
-flutter run
-```
-
-## Usage
-
-1. Launch the app
-2. Enter IRC server details (server, port, channel, nickname)
-3. Click "Connect"
-4. Start chatting!
-
-## Project Structure
+## 🏗️ Architektura
 
 ```
 GehChat/
-├── Frontend/
-│   └── geh_chat_frontend/
-│       ├── lib/
-│       │   ├── main.dart
-│       │   ├── models/
-│       │   │   └── chat_state.dart
-│       │   ├── screens/
-│       │   │   ├── connection_screen.dart
-│       │   │   ├── main_chat_screen.dart
-│       │   │   └── private_chat_screen.dart
-│       │   └── services/
-│       │       ├── irc_service.dart
-│       │       ├── notification_service.dart
-│       │       └── connection_settings_service.dart
-│       └── android/
-└── Backend/ (planned)
+├── Backend/              # Python FastAPI server
+│   ├── main.py          # Główny plik serwera
+│   ├── requirements.txt # Zależności Python
+│   └── venv/            # Środowisko wirtualne
+└── Frontend/            # Flutter aplikacja
+    └── geh_chat_frontend/
+        ├── lib/         # Kod źródłowy Dart
+        ├── android/     # Konfiguracja Android
+        ├── ios/         # Konfiguracja iOS
+        └── windows/     # Konfiguracja Windows
 ```
 
-## License
+## 🚀 Szybki Start
 
-This project is open source and available under the MIT License.
+### Wymagania
+
+- Python 3.11 lub nowszy
+- Flutter SDK 3.0+
+- Visual Studio Code (zalecane)
+
+### Instalacja Zależności
+
+#### Backend (Python)
+```bash
+cd Backend
+python -m venv venv
+.\venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+```
+
+#### Frontend (Flutter)
+```bash
+cd Frontend/geh_chat_frontend
+flutter pub get
+```
+
+### 🎯 Uruchamianie w VS Code
+
+#### Opcja 1: Użyj Tasks (Zalecane)
+1. Otwórz paletę komend: `Ctrl+Shift+P`
+2. Wpisz: `Tasks: Run Task`
+3. Wybierz: **"Start Backend & Frontend"**
+
+To uruchomi oba serwery jednocześnie w osobnych terminalach!
+
+#### Opcja 2: Użyj Debuggera
+1. Przejdź do zakładki Run/Debug (`Ctrl+Shift+D`)
+2. Wybierz z dropdown: **"🚀 Full Stack: Backend + Frontend"**
+3. Kliknij zielony przycisk Play (F5)
+
+To uruchomi oba projekty w trybie debug!
+
+#### Opcja 3: Ręcznie
+
+**Terminal 1 - Backend:**
+```bash
+cd Backend
+python main.py
+```
+Server będzie dostępny pod: http://localhost:8000
+
+**Terminal 2 - Frontend:**
+```bash
+cd Frontend/geh_chat_frontend
+flutter run -d windows
+```
+
+### 📡 Dostęp do API
+
+- **Backend API**: http://localhost:8000
+- **API Docs (Swagger)**: http://localhost:8000/docs
+- **WebSocket**: ws://localhost:8000/ws
+
+## 📚 Dokumentacja
+
+- [Backend README](Backend/README.md) - Dokumentacja serwera Python
+- [Frontend README](Frontend/geh_chat_frontend/README.md) - Dokumentacja aplikacji Flutter
+- [Communication Design](GehChat_Communication_Design.html) - Dokumentacja komunikacji klient-serwer
+
+## 🛠️ Dostępne Komendy VS Code
+
+### Tasks (Ctrl+Shift+P → Tasks: Run Task)
+- **Start Backend & Frontend** - Uruchom całą aplikację
+- **Start Backend (Python)** - Tylko backend
+- **Start Frontend (Flutter)** - Tylko frontend
+- **Install All Dependencies** - Zainstaluj wszystkie zależności
+- **Install Backend Dependencies** - Tylko zależności Python
+- **Install Frontend Dependencies** - Tylko zależności Flutter
+
+### Launch Configurations (F5)
+- **🚀 Full Stack: Backend + Frontend** - Debug obu aplikacji
+- **Python: Backend Server** - Debug tylko backend
+- **geh_chat_frontend** - Debug tylko frontend
+
+## 🔧 Konfiguracja
+
+### Backend Environment Variables
+Skopiuj `.env.example` do `.env` w katalogu Backend:
+```bash
+cd Backend
+cp .env.example .env
+```
+
+## 📦 Technologie
+
+### Backend
+- **FastAPI** - Nowoczesny framework web
+- **Uvicorn** - ASGI server
+- **WebSockets** - Real-time komunikacja
+- **Python 3.11+**
+
+### Frontend
+- **Flutter** - Cross-platform UI framework
+- **Dart** - Język programowania
+- **Provider** - State management
+- **IRC Protocol** - Direct socket connection
+
+## 🤝 Wkład
+
+Projekt jest otwarty na wkład społeczności. Pull requesty są mile widziane!
+
+## 📄 Licencja
+
+MIT License - szczegóły w pliku LICENSE
+
+## 📞 Kontakt
+
+Jeśli masz pytania lub sugestie, otwórz issue na GitHubie.
+
+---
+
+**Enjoy coding! 🎉**
