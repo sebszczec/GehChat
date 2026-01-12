@@ -15,10 +15,10 @@ class ConnectionScreen extends StatefulWidget {
 
 class _ConnectionScreenState extends State<ConnectionScreen> {
   final TextEditingController _serverController = TextEditingController(
-    text: 'slaugh.pl',
+    text: 'localhost',
   );
   final TextEditingController _portController = TextEditingController(
-    text: '6667',
+    text: '8000',
   );
   final TextEditingController _channelController = TextEditingController(
     text: '#vorest',
@@ -73,20 +73,8 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   Future<void> _connect() async {
     if (_isConnecting) return;
 
-    // Check if running on web platform
-    if (kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${AppLocalizations.of(context).ircNotSupportedInBrowser} '
-            '${AppLocalizations.of(context).useDesktopOrMobile}',
-          ),
-          duration: const Duration(seconds: 5),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
+    // WebSocket now works on Web platform too!
+    // No need to block Web anymore
 
     final server = _serverController.text.trim();
     final portStr = _portController.text.trim();

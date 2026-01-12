@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
-import 'services/irc_service.dart';
+import 'services/websocket_irc_service.dart';
 import 'services/notification_service.dart';
 import 'services/battery_optimization_service.dart';
 import 'models/chat_state.dart';
@@ -14,7 +14,7 @@ import 'l10n/app_localizations.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 ChatState? _globalChatState;
 
-// Global IRC service that persists even when UI is destroyed
+// Global IRC service that persists even when UI is destroyed - using WebSocket
 final IrcService _globalIrcService = IrcService();
 
 void main() async {
