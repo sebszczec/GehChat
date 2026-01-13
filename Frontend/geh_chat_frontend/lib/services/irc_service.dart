@@ -237,7 +237,12 @@ class IrcService {
   void sendMessage(String message, {String? target}) {
     if (!_isConnected) return;
 
-    final recipient = target ?? channel;
+    var recipient = target ?? channel;
+
+    // Remove @ prefix if present (IRC doesn't accept @ in nicknames)
+    if (recipient.startsWith('@')) {
+      recipient = recipient.substring(1);
+    }
 
     _sendToBackend({
       'type': 'message',
