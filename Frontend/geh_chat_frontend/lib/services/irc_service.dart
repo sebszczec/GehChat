@@ -97,6 +97,12 @@ class IrcService {
     if (newServer != null) server = newServer;
     if (newPort != null) port = newPort;
     if (newChannel != null) channel = newChannel;
+
+    // Rebuild backendUrl if server or port changed
+    if (newServer != null || newPort != null) {
+      backendUrl = 'ws://$server:$port/ws';
+      debugPrint('Updated backend URL to: $backendUrl');
+    }
   }
 
   void _addSystemMessage(String content) {

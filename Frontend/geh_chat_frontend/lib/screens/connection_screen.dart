@@ -186,7 +186,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   }
 
   bool _isValidIpOrDomain(String server) {
-    // IPv4 pattern
+    // IPv4 pattern - matches any IP address format with 4 octets
     final ipv4Pattern = RegExp(r'^(\d{1,3}\.){3}\d{1,3}$');
 
     // Hostname/domain pattern (alphanumeric, dots, hyphens)
@@ -195,13 +195,15 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     );
 
     // localhost is always valid
-    if (server.toLowerCase() == 'localhost') {
+    if (server.toLowerCase() == 'localhost' || server == '127.0.0.1') {
       return true;
     }
 
-    // Check if it's a valid IPv4
+    // Check if it's a valid IPv4 (including special IPs like 10.0.2.2 for Android emulator)
     if (ipv4Pattern.hasMatch(server)) {
       final parts = server.split('.');
+      // For IPv4, we accept any value 0-255 in each octet
+      // This includes special IPs like 10.0.2.2 (Android emulator gateway)
       for (var part in parts) {
         final num = int.tryParse(part);
         if (num == null || num < 0 || num > 255) {
@@ -265,7 +267,8 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
     try {
       // Fetch IRC configuration from backend with timeout
-      String channel;
+      String channel = '#vorest'; // Default channel
+
       try {
         final ircConfigUrl = BackendConfig.getIrcConfigUrl(server, port);
 
@@ -277,67 +280,29 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           final config = json.decode(response.body);
           channel = config['channel'] ?? '#vorest';
         } else {
-          throw Exception('Failed to fetch IRC config: ${response.statusCode}');
+          // If config fetch fails, use default channel and continue
+          // This allows connection on Android emulator where config fetch might fail
+          // but WebSocket connection might still work
+          debugPrint(
+            'Warning: Failed to fetch IRC config: ${response.statusCode}, using default channel',
+          );
         }
       } on SocketException catch (e) {
-        // Host is unreachable or cannot resolve
-        if (mounted && !_isAborted) {
-          String errorMessage = AppLocalizations.of(context).hostUnreachable;
-          if (e.toString().contains('Connection refused')) {
-            errorMessage =
-                '${AppLocalizations.of(context).connectionRefused}: $server';
-          } else if (e.toString().contains('Name or service not known') ||
-              e.toString().contains('No address associated')) {
-            errorMessage =
-                '${AppLocalizations.of(context).hostNotFound}: $server';
-          }
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(errorMessage),
-              duration: const Duration(seconds: 4),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        setState(() {
-          _isConnecting = false;
-        });
-        _isAborted = false; // Reset abort flag
-        return;
+        // For Android emulator (10.0.2.2), HTTP might fail but WebSocket could work
+        // Try to connect anyway with default channel
+        debugPrint(
+          'Warning: Socket error fetching config: $e, attempting connection with default channel',
+        );
       } on TimeoutException catch (_) {
-        // HTTP request timeout
-        if (mounted && !_isAborted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(AppLocalizations.of(context).connectionTimeout),
-              duration: const Duration(seconds: 4),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        setState(() {
-          _isConnecting = false;
-        });
-        _isAborted = false; // Reset abort flag
-        return;
+        // HTTP request timeout - try with default channel anyway
+        debugPrint(
+          'Warning: HTTP config fetch timeout, attempting connection with default channel',
+        );
       } catch (e) {
-        if (mounted && !_isAborted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${AppLocalizations.of(context).cannotConnectToBackend}: $e',
-              ),
-              duration: const Duration(seconds: 3),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        setState(() {
-          _isConnecting = false;
-        });
-        _isAborted = false; // Reset abort flag
-        return;
+        // Any other error - try with default channel
+        debugPrint(
+          'Warning: Error fetching IRC config: $e, attempting connection with default channel',
+        );
       }
 
       if (!mounted) return;
