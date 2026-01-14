@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geh_chat_frontend/services/irc_service.dart';
-import 'dart:async';
 
 void main() {
   group('IrcService', () {

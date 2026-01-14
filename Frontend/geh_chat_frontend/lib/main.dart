@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show PlatformDispatcher;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
 import 'services/irc_service.dart';
 import 'services/notification_service.dart';
 import 'services/battery_optimization_service.dart';
@@ -19,6 +21,41 @@ final IrcService _globalIrcService = IrcService();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Set up global error handler for unhandled exceptions
+  FlutterError.onError = (FlutterErrorDetails details) {
+    // Log the error
+    debugPrint('FlutterError: ${details.exceptionAsString()}');
+
+    // Show error notification if it's a connection error
+    final errorStr = details.exceptionAsString().toLowerCase();
+    if (errorStr.contains('websocket') ||
+        errorStr.contains('connection') ||
+        errorStr.contains('socket')) {
+      // These errors are handled by IrcService, just log them
+      debugPrint(
+        'WebSocket/Connection error (handled by IrcService): $details',
+      );
+      // Don't rethrow - this error is handled
+      return;
+    } else {
+      // For other errors, let Flutter handle it
+      FlutterError.dumpErrorToConsole(details);
+    }
+  };
+
+  // Set up handler for errors outside of Flutter
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Platform error: $error');
+    if (error.toString().toLowerCase().contains('websocket') ||
+        error.toString().toLowerCase().contains('connection') ||
+        error.toString().toLowerCase().contains('socket')) {
+      // WebSocket errors are expected and handled
+      debugPrint('WebSocket error suppressed: $error');
+      return true; // Return true to indicate the error is handled
+    }
+    return false;
+  };
 
   final notificationService = NotificationService();
   await notificationService.initialize();

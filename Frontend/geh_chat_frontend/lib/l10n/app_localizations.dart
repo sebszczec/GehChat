@@ -30,6 +30,7 @@ abstract class AppLocalizations {
   String get configureConnectionSettings;
   String get pleaseFillAllFields;
   String get invalidPortNumber;
+  String get invalidIpAddress;
   String get connectionFailed;
   String get ircNotSupportedInBrowser;
   String get useDesktopOrMobile;
@@ -42,11 +43,18 @@ abstract class AppLocalizations {
   String get debugLogLevel;
   String get showAllIrcMessages;
   String get connect;
+  String get abort;
+  String get connectionAborted;
   String get channelHint;
   String get systemMessages;
   String get noSystemMessages;
   String get backendServer;
   String get backendPort;
+  String get hostUnreachable;
+  String get connectionRefused;
+  String get hostNotFound;
+  String get cannotConnectToBackend;
+  String get connectionTimeout;
 }
 
 class AppLocalizationsEn extends AppLocalizations {
@@ -126,6 +134,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invalidPortNumber => 'Invalid port number';
 
   @override
+  String get invalidIpAddress => 'Invalid IP address or hostname';
+
+  @override
   String get connectionFailed => 'Connection failed';
 
   @override
@@ -164,6 +175,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get connect => 'Connect';
 
   @override
+  String get abort => 'Abort';
+
+  @override
+  String get connectionAborted => 'Connection aborted';
+
+  @override
   String get channelHint => '#channel';
 
   @override
@@ -177,6 +194,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get backendPort => 'Backend Port';
+
+  @override
+  String get hostUnreachable => 'Host is unreachable';
+
+  @override
+  String get connectionRefused => 'Connection refused';
+
+  @override
+  String get hostNotFound => 'Host not found';
+
+  @override
+  String get cannotConnectToBackend => 'Cannot connect to backend';
+
+  @override
+  String get connectionTimeout => 'Connection timeout - server not responding';
 }
 
 // Polish localization ready to be implemented
@@ -256,6 +288,9 @@ class AppLocalizationsPl extends AppLocalizations {
   String get invalidPortNumber => 'Nieprawidłowy numer portu';
 
   @override
+  String get invalidIpAddress => 'Nieprawidłowy adres IP lub nazwa hosta';
+
+  @override
   String get connectionFailed => 'Połączenie nieudane';
 
   @override
@@ -295,6 +330,12 @@ class AppLocalizationsPl extends AppLocalizations {
   String get connect => 'Połącz';
 
   @override
+  String get abort => 'Anuluj';
+
+  @override
+  String get connectionAborted => 'Połączenie anulowane';
+
+  @override
   String get channelHint => '#kanał';
 
   @override
@@ -308,6 +349,21 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get backendPort => 'Port backend';
+
+  @override
+  String get hostUnreachable => 'Host jest nieosiągalny';
+
+  @override
+  String get connectionRefused => 'Połączenie odrzucone';
+
+  @override
+  String get hostNotFound => 'Host nie znaleziony';
+
+  @override
+  String get cannotConnectToBackend => 'Nie można połączyć się z backendem';
+
+  @override
+  String get connectionTimeout => 'Timeout połączenia - serwer nie odpowiada';
 }
 
 class AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

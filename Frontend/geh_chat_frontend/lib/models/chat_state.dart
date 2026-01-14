@@ -68,6 +68,8 @@ class ChatState extends ChangeNotifier {
   Map<String, int> get unreadCounts => _unreadCounts;
   List<String> get users => _users;
   IrcConnectionState get connectionState => _connectionState;
+  Stream<IrcConnectionState> get connectionStateStream =>
+      _ircService.connectionState;
   String get nickname => _ircService.nickname;
   String get channel => _ircService.channel;
   String? get activeChat => _activeChat;
@@ -241,7 +243,13 @@ class ChatState extends ChangeNotifier {
   }
 
   Future<void> connect() async {
-    await _ircService.connect();
+    try {
+      await _ircService.connect();
+    } catch (e) {
+      // Connection error is already handled by IrcService streams
+      // This catch prevents unhandled exceptions from crashing the app
+      debugPrint('Connection error in connect: $e');
+    }
   }
 
   Future<void> connectWithSettings({
@@ -251,23 +259,31 @@ class ChatState extends ChangeNotifier {
     required String nickname,
     bool debugMode = false,
   }) async {
-    // Save connection settings for auto-reconnect
-    _lastConnectionSettings = ConnectionSettings(
-      server: server,
-      port: port,
-      channel: channel,
-      nickname: nickname,
-    );
+    try {
+      // Save connection settings for auto-reconnect
+      _lastConnectionSettings = ConnectionSettings(
+        server: server,
+        port: port,
+        channel: channel,
+        nickname: nickname,
+      );
 
-    // Reset manual disconnect flag - user is manually connecting
-    _wasManuallyDisconnected = false;
-    _ircService.updateSettings(
-      newServer: server,
-      newPort: port,
-      newChannel: channel,
-    );
-    _ircService.debugMode = debugMode;
-    await _ircService.connect(customNickname: nickname);
+      // Reset manual disconnect flag - user is manually connecting
+      _wasManuallyDisconnected = false;
+      _ircService.updateSettings(
+        newServer: server,
+        newPort: port,
+        newChannel: channel,
+      );
+      _ircService.debugMode = debugMode;
+      await _ircService.connect(customNickname: nickname);
+    } catch (e) {
+      // Connection error is already handled by IrcService streams
+      // This catch prevents unhandled exceptions from crashing the app
+      debugPrint('Connection error in connectWithSettings: $e');
+      // The error message is already shown through _handleConnectionState
+      // which updates via _connectionStateController
+    }
   }
 
   String generateRandomNickname() {

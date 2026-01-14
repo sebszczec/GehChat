@@ -57,6 +57,22 @@ class IrcService {
       'en': 'Connection error occurred',
       'pl': 'Wystąpił błąd połączenia',
     },
+    'connection_refused': {
+      'en': 'Connection refused - Backend is not running or unreachable',
+      'pl': 'Połączenie odrzucone - Backend nie działa lub jest niedostępny',
+    },
+    'connection_timeout': {
+      'en': 'Connection timeout - Backend is taking too long to respond',
+      'pl': 'Timeout połączenia - Backend zbyt długo nie odpowiada',
+    },
+    'invalid_backend_url': {
+      'en': 'Invalid backend URL: ',
+      'pl': 'Błędny adres backendu: ',
+    },
+    'network_error': {
+      'en': 'Network error - Check your internet connection',
+      'pl': 'Błąd sieciowy - Sprawdź swoje połączenie internetowe',
+    },
   };
 
   IrcService({String? server, int? port, String? channel, String? backendUrl})
@@ -84,59 +100,197 @@ class IrcService {
   }
 
   void _addSystemMessage(String content) {
-    _messageController.add(
-      IrcMessage(
-        sender: 'System',
-        content: content,
-        target: channel,
-        timestamp: DateTime.now(),
-        isPrivate: false,
-        isSystem: true,
-      ),
-    );
+    try {
+      if (!_messageController.isClosed) {
+        _messageController.add(
+          IrcMessage(
+            sender: 'System',
+            content: content,
+            target: channel,
+            timestamp: DateTime.now(),
+            isPrivate: false,
+            isSystem: true,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error adding system message: $e');
+    }
   }
 
   Future<void> connect({String? customNickname}) async {
-    try {
-      _connectionStateController.add(IrcConnectionState.connecting);
-      _addSystemMessage('${_t('connecting')} $backendUrl...');
+    // Wrap entire connection in a zone with error handler
+    // to catch any async exceptions that might escape
+    await runZoned(
+      () async {
+        try {
+          _connectionStateController.add(IrcConnectionState.connecting);
+          _addSystemMessage('${_t('connecting')} $backendUrl...');
 
-      // Connect to backend WebSocket
-      _channel = WebSocketChannel.connect(Uri.parse(backendUrl));
+          // Validate URL format
+          try {
+            Uri.parse(backendUrl);
+          } catch (e) {
+            _isConnected = false;
+            _connectionStateController.add(IrcConnectionState.error);
+            _addSystemMessage('${_t('invalid_backend_url')}$backendUrl');
+            return;
+          }
 
-      _isConnected = true;
-      _connectionStateController.add(IrcConnectionState.joiningChannel);
+          // Connect to backend WebSocket with timeout
+          WebSocketChannel? channel;
+          try {
+            // Use timeout to catch connection refused errors early
+            channel =
+                await Future.value(
+                  WebSocketChannel.connect(Uri.parse(backendUrl)),
+                ).timeout(
+                  const Duration(seconds: 5),
+                  onTimeout: () {
+                    throw TimeoutException(
+                      'WebSocket connection timeout',
+                      const Duration(seconds: 5),
+                    );
+                  },
+                );
+          } catch (e) {
+            _isConnected = false;
+            _connectionStateController.add(IrcConnectionState.error);
+            _handleConnectionError(e);
+            return;
+          }
 
-      // Generate nickname
-      _nickname = customNickname ?? _generateFriendlyNickname();
-      _addSystemMessage('${_t('using_nickname')} $_nickname');
+          // IMPORTANT: Attach listener IMMEDIATELY to catch any connection errors
+          // This must be done BEFORE setting _isConnected = true
+          try {
+            channel.stream.listen(
+              (data) {
+                try {
+                  _handleBackendMessage(data);
+                } catch (e, stackTrace) {
+                  debugPrint('Error handling backend message: $e\n$stackTrace');
+                }
+              },
+              onError: (dynamic error, StackTrace? stackTrace) {
+                // This callback MUST NOT throw any exceptions
+                try {
+                  debugPrint(
+                    'WebSocket stream error: $error\nStackTrace: $stackTrace',
+                  );
 
-      // Listen to backend messages
-      _channel!.stream.listen(
-        _handleBackendMessage,
-        onError: (error) {
+                  // Attempt to mark as disconnected
+                  try {
+                    _isConnected = false;
+                  } catch (_) {}
+
+                  // Attempt to add error state
+                  try {
+                    if (!_connectionStateController.isClosed) {
+                      _connectionStateController.add(IrcConnectionState.error);
+                    }
+                  } catch (_) {}
+
+                  // Attempt to show error message
+                  try {
+                    _handleConnectionError(error);
+                  } catch (_) {}
+                } catch (e) {
+                  // If anything goes wrong, just log it and move on
+                  debugPrint('Error in onError handler: $e');
+                }
+              },
+              onDone: () {
+                try {
+                  _isConnected = false;
+                  _addSystemMessage(_t('disconnected'));
+                  if (!_connectionStateController.isClosed) {
+                    _connectionStateController.add(
+                      IrcConnectionState.disconnected,
+                    );
+                  }
+                } catch (e) {
+                  debugPrint('Error in onDone handler: $e');
+                }
+              },
+              cancelOnError:
+                  false, // Continue listening even if there's an error
+            );
+          } catch (e, stackTrace) {
+            // Catch any errors during listener attachment
+            try {
+              _isConnected = false;
+              if (!_connectionStateController.isClosed) {
+                _connectionStateController.add(IrcConnectionState.error);
+              }
+              _handleConnectionError(e);
+              debugPrint('Error attaching WebSocket listener: $e\n$stackTrace');
+            } catch (e2) {
+              debugPrint('Error in error handler: $e2');
+            }
+            return;
+          }
+
+          // Now that listener is attached, mark as connected
+          _channel = channel;
+          _isConnected = true;
+          _connectionStateController.add(IrcConnectionState.joiningChannel);
+
+          // Generate nickname
+          _nickname = customNickname ?? _generateFriendlyNickname();
+          _addSystemMessage('${_t('using_nickname')} $_nickname');
+
+          // Send connect command to backend
+          // Only nickname is sent - IRC server config comes from backend
+          _sendToBackend({'type': 'connect', 'nickname': _nickname});
+
+          _addSystemMessage(_t('sent_auth'));
+        } catch (e, stackTrace) {
           _isConnected = false;
-          _addSystemMessage(_t('connection_error'));
           _connectionStateController.add(IrcConnectionState.error);
-          _messageController.addError(error);
-        },
-        onDone: () {
+          _handleConnectionError(e);
+          debugPrint('Connection error: $e\n$stackTrace');
+        }
+      },
+      onError: (dynamic error, StackTrace stackTrace) {
+        // Zone-level error handler - catches any async errors that escape
+        debugPrint('Zone error caught: $error\nStackTrace: $stackTrace');
+        try {
           _isConnected = false;
-          _addSystemMessage(_t('disconnected'));
-          _connectionStateController.add(IrcConnectionState.disconnected);
-        },
-      );
+          if (!_connectionStateController.isClosed) {
+            _connectionStateController.add(IrcConnectionState.error);
+          }
+          _handleConnectionError(error);
+        } catch (e) {
+          debugPrint('Error in zone error handler: $e');
+        }
+      },
+    );
+  }
 
-      // Send connect command to backend
-      // Only nickname is sent - IRC server config comes from backend
-      _sendToBackend({'type': 'connect', 'nickname': _nickname});
+  /// Handle and display user-friendly connection error messages
+  void _handleConnectionError(dynamic error) {
+    try {
+      String errorMessage = _t('connection_error');
 
-      _addSystemMessage(_t('sent_auth'));
+      final errorStr = error.toString().toLowerCase();
+
+      if (errorStr.contains('connection refused')) {
+        errorMessage = _t('connection_refused');
+      } else if (errorStr.contains('timeout') ||
+          errorStr.contains('timed out')) {
+        errorMessage = _t('connection_timeout');
+      } else if (errorStr.contains('network') ||
+          errorStr.contains('unreachable') ||
+          errorStr.contains('no route')) {
+        errorMessage = _t('network_error');
+      } else if (errorStr.contains('socket') || errorStr.contains('errno')) {
+        // Parse socket errors for more details
+        errorMessage = 'Connection failed: $error';
+      }
+
+      _addSystemMessage(errorMessage);
     } catch (e) {
-      _isConnected = false;
-      _connectionStateController.add(IrcConnectionState.error);
-      _addSystemMessage('Connection failed: $e');
-      rethrow;
+      debugPrint('Error handling connection error: $e');
     }
   }
 
@@ -262,10 +416,20 @@ class IrcService {
   void disconnect() {
     if (!_isConnected) return;
 
-    _sendToBackend({'type': 'disconnect'});
+    try {
+      _sendToBackend({'type': 'disconnect'});
+    } catch (e) {
+      debugPrint('Error sending disconnect message: $e');
+    }
 
     _stopKeepaliveTimer();
-    _channel?.sink.close();
+
+    try {
+      _channel?.sink.close();
+    } catch (e) {
+      debugPrint('Error closing WebSocket sink: $e');
+    }
+
     _channel = null;
     _isConnected = false;
     _channelUsers.clear();
