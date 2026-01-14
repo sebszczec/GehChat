@@ -1,46 +1,46 @@
 # GehChat
 
-Kompletna aplikacja czatu IRC z backendem Python i frontendem Flutter.
+A complete IRC chat application with Python backend and Flutter frontend.
 
-## 🏗️ Architektura
+## 🏗️ Architecture
 
 ```
 GehChat/
 ├── Backend/              # Python FastAPI server - IRC Bridge
-│   ├── main.py          # Główny plik serwera - IRC Bridge
-│   ├── config.py        # Konfiguracja (IRC, Backend)
-│   ├── requirements.txt # Zależności Python
-│   ├── .env.example     # Przykładowa konfiguracja
-│   └── venv/            # Środowisko wirtualne
-└── Frontend/            # Flutter aplikacja
+│   ├── main.py          # Main server file - IRC Bridge
+│   ├── config.py        # Configuration (IRC, Backend)
+│   ├── requirements.txt # Python dependencies
+│   ├── .env.example     # Example configuration
+│   └── venv/            # Virtual environment
+└── Frontend/            # Flutter application
     └── geh_chat_frontend/
-        ├── lib/         # Kod źródłowy Dart
-        │   ├── config/  # Konfiguracja (backend_config.dart)
-        │   ├── services/ # Usługi (WebSocket IRC service)
+        ├── lib/         # Dart source code
+        │   ├── config/  # Configuration (backend_config.dart)
+        │   ├── services/ # Services (WebSocket IRC service)
         │   └── ...
-        ├── android/     # Konfiguracja Android
-        ├── ios/         # Konfiguracja iOS
-        └── windows/     # Konfiguracja Windows
+        ├── android/     # Android configuration
+        ├── ios/         # iOS configuration
+        └── windows/     # Windows configuration
 ```
 
-### Przepływ komunikacji
+### Communication Flow
 
 ```
 Client (Flutter) <--> WebSocket <--> Backend (Python) <--> IRC Server
      ws://localhost:8000/ws            Socket              slaugh.pl:6667
 ```
 
-Backend działa jako **IRC Bridge**, przekazując wiadomości między klientami WebSocket a serwerem IRC.
+Backend acts as an **IRC Bridge**, relaying messages between WebSocket clients and IRC servers.
 
-## 🚀 Szybki Start
+## 🚀 Quick Start
 
-### Wymagania
+### Requirements
 
-- Python 3.11 lub nowszy
+- Python 3.11 or newer
 - Flutter SDK 3.0+
-- Visual Studio Code (zalecane)
+- Visual Studio Code (recommended)
 
-### Instalacja Zależności
+### Install Dependencies
 
 #### Backend (Python)
 ```bash
@@ -56,30 +56,30 @@ cd Frontend/geh_chat_frontend
 flutter pub get
 ```
 
-### 🎯 Uruchamianie w VS Code
+### 🎯 Running in VS Code
 
-#### Opcja 1: Użyj Tasks (Zalecane)
-1. Otwórz paletę komend: `Ctrl+Shift+P`
-2. Wpisz: `Tasks: Run Task`
-3. Wybierz: **"Start Backend & Frontend"**
+#### Option 1: Use Tasks (Recommended)
+1. Open command palette: `Ctrl+Shift+P`
+2. Type: `Tasks: Run Task`
+3. Select: **"Start Backend & Frontend"**
 
-To uruchomi oba serwery jednocześnie w osobnych terminalach!
+This will run both servers simultaneously in separate terminals!
 
-#### Opcja 2: Użyj Debuggera
-1. Przejdź do zakładki Run/Debug (`Ctrl+Shift+D`)
-2. Wybierz z dropdown: **"🚀 Full Stack: Backend + Frontend"**
-3. Kliknij zielony przycisk Play (F5)
+#### Option 2: Use Debugger
+1. Go to Run/Debug tab (`Ctrl+Shift+D`)
+2. Select from dropdown: **"🚀 Full Stack: Backend + Frontend"**
+3. Click the green Play button (F5)
 
-To uruchomi oba projekty w trybie debug!
+This will run both projects in debug mode!
 
-#### Opcja 3: Ręcznie
+#### Option 3: Manual
 
 **Terminal 1 - Backend:**
 ```bash
 cd Backend
 python main.py
 ```
-Server będzie dostępny pod: http://localhost:8000
+Server will be available at: http://localhost:8000
 
 **Terminal 2 - Frontend:**
 ```bash
@@ -87,38 +87,38 @@ cd Frontend/geh_chat_frontend
 flutter run -d windows
 ```
 
-### 📡 Dostęp do API
+### 📡 API Access
 
 - **Backend API**: http://localhost:8000
 - **API Docs (Swagger)**: http://localhost:8000/docs
 - **WebSocket**: ws://localhost:8000/ws
 
-## 📚 Dokumentacja
+## 📚 Documentation
 
-- [Backend README](Backend/README.md) - Dokumentacja serwera Python
-- [Frontend README](Frontend/geh_chat_frontend/README.md) - Dokumentacja aplikacji Flutter
-- [Communication Design](GehChat_Communication_Design.html) - Dokumentacja komunikacji klient-serwer
+- [Backend README](Backend/README.md) - Python server documentation
+- [Frontend README](Frontend/geh_chat_frontend/README.md) - Flutter application documentation
+- [Communication Design](GehChat_Communication_Design.html) - Client-server communication documentation
 
-## 🛠️ Dostępne Komendy VS Code
+## 🛠️ Available VS Code Commands
 
 ### Tasks (Ctrl+Shift+P → Tasks: Run Task)
-- **Start Backend & Frontend** - Uruchom całą aplikację
-- **Start Backend (Python)** - Tylko backend
-- **Start Frontend (Flutter)** - Tylko frontend
-- **Install All Dependencies** - Zainstaluj wszystkie zależności
-- **Install Backend Dependencies** - Tylko zależności Python
-- **Install Frontend Dependencies** - Tylko zależności Flutter
+- **Start Backend & Frontend** - Run the entire application
+- **Start Backend (Python)** - Backend only
+- **Start Frontend (Flutter)** - Frontend only
+- **Install All Dependencies** - Install all dependencies
+- **Install Backend Dependencies** - Python dependencies only
+- **Install Frontend Dependencies** - Flutter dependencies only
 
 ### Launch Configurations (F5)
-- **🚀 Full Stack: Backend + Frontend** - Debug obu aplikacji
-- **Python: Backend Server** - Debug tylko backend
-- **geh_chat_frontend** - Debug tylko frontend
+- **🚀 Full Stack: Backend + Frontend** - Debug both applications
+- **Python: Backend Server** - Debug backend only
+- **geh_chat_frontend** - Debug frontend only
 
-## 🔧 Konfiguracja
+## 🔧 Configuration
 
 ### Backend Configuration
 
-Backend używa zmiennych środowiskowych do konfiguracji. Skopiuj `.env.example` do `.env` w katalogu Backend:
+Backend uses environment variables for configuration. Copy `.env.example` to `.env` in the Backend directory:
 
 ```bash
 cd Backend
@@ -126,7 +126,7 @@ cp .env.example .env  # Linux/Mac
 copy .env.example .env  # Windows
 ```
 
-Dostosuj wartości w `.env`:
+Customize values in `.env`:
 ```env
 # Backend Server Configuration
 BACKEND_HOST=0.0.0.0
@@ -140,47 +140,47 @@ IRC_CHANNEL=#vorest
 
 ### Frontend Configuration
 
-Frontend ma wbudowaną konfigurację w `lib/config/backend_config.dart`:
-- Domyślny adres backendu: `127.0.0.1` (loopback IP)
-- Domyślny port backendu: `8000`
+Frontend has built-in configuration in `lib/config/backend_config.dart`:
+- Default backend address: `127.0.0.1` (loopback IP)
+- Default backend port: `8000`
 - WebSocket URL: `ws://127.0.0.1:8000/ws`
 
-Podczas łączenia, użytkownik podaje:
-- **Backend Server** - adres serwera backendu (domyślnie 127.0.0.1, można zmienić na dowolny IP lub domenę)
-- **Backend Port** - port backendu (domyślnie 8000)
-- **Nickname** - pseudonim użytkownika
+When connecting, user provides:
+- **Backend Server** - backend server address (default 127.0.0.1, can be changed to any IP or domain)
+- **Backend Port** - backend port (default 8000)
+- **Nickname** - user nickname
 
-Kanał IRC jest automatycznie pobierany z backendu przez endpoint `/api/irc-config`.
-Użytkownik nie musi znać szczegółów konfiguracji IRC - wszystko jest zarządzane przez backend.
+IRC channel is automatically fetched from backend via `/api/irc-config` endpoint.
+User doesn't need to know IRC configuration details - everything is managed by the backend.
 
-## 📦 Technologie
+## 📦 Technologies
 
 ### Backend
-- **FastAPI** - Nowoczesny framework web
+- **FastAPI** - Modern web framework
 - **Uvicorn** - ASGI server
-- **WebSockets** - Real-time komunikacja z klientami
-- **Socket** - Bezpośrednie połączenie IRC
+- **WebSockets** - Real-time client communication
+- **Socket** - Direct IRC connection
 - **Python 3.11+**
-- **Pydantic** - Walidacja i konfiguracja
+- **Pydantic** - Validation and configuration
 
 ### Frontend
 - **Flutter** - Cross-platform UI framework
-- **Dart** - Język programowania
+- **Dart** - Programming language
 - **Provider** - State management
-- **WebSocket** - Komunikacja z backendem
-- **web_socket_channel** - WebSocket dla Flutter
+- **WebSocket** - Backend communication
+- **web_socket_channel** - WebSocket for Flutter
 
-## 🤝 Wkład
+## 🤝 Contributing
 
-Projekt jest otwarty na wkład społeczności. Pull requesty są mile widziane!
+The project is open to community contributions. Pull requests are welcome!
 
-## 📄 Licencja
+## 📄 License
 
-MIT License - szczegóły w pliku LICENSE
+MIT License - see LICENSE file for details
 
-## 📞 Kontakt
+## 📞 Contact
 
-Jeśli masz pytania lub sugestie, otwórz issue na GitHubie.
+If you have questions or suggestions, please open an issue on GitHub.
 
 ---
 
