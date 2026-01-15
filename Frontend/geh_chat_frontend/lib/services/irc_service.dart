@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:encrypt/encrypt.dart' as encrypt;
+import 'encryption_service.dart';
 
 class IrcService {
   WebSocketChannel? _channel;
@@ -14,6 +16,9 @@ class IrcService {
 
   // Backend WebSocket URL
   String backendUrl;
+
+  // Encryption service for private messages
+  late EncryptionService _encryptionService;
 
   final StreamController<IrcMessage> _messageController =
       StreamController<IrcMessage>.broadcast();
@@ -79,7 +84,9 @@ class IrcService {
     : server = server ?? 'slaugh.pl',
       port = port ?? 6667,
       channel = channel ?? '#vorest',
-      backendUrl = backendUrl ?? 'ws://localhost:8000/ws';
+      backendUrl = backendUrl ?? 'ws://localhost:8000/ws' {
+    _encryptionService = EncryptionService(debugMode: debugMode);
+  }
 
   String get nickname => _nickname ?? '';
 
@@ -102,6 +109,45 @@ class IrcService {
     if (newServer != null || newPort != null) {
       backendUrl = 'ws://$server:$port/ws';
       debugPrint('Updated backend URL to: $backendUrl');
+    }
+  }
+
+  /// Check if a user is a Frontend user by querying the backend
+  /// Returns true if the user has active encryption sessions (is a Frontend user)
+  /// Returns false if the user is a regular IRC user
+  Future<bool> checkIsFrontendUser(String nickname) async {
+    try {
+      final httpUrl = backendUrl
+          .replaceAll('ws://', 'http://')
+          .replaceAll('wss://', 'https://')
+          .replaceAll('/ws', '/api/is-frontend-user/$nickname');
+
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse(httpUrl));
+      final response = await request.close();
+
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final isFrontend = json['is_frontend_user'] as bool? ?? false;
+
+        if (debugMode) {
+          debugPrint(
+            '[Frontend Check] User $nickname is Frontend user: $isFrontend',
+          );
+        }
+
+        return isFrontend;
+      }
+
+      return false;
+    } catch (e) {
+      if (debugMode) {
+        debugPrint(
+          '[Frontend Check] Error checking if $nickname is frontend user: $e',
+        );
+      }
+      return false;
     }
   }
 
@@ -242,12 +288,22 @@ class IrcService {
           _connectionStateController.add(IrcConnectionState.joiningChannel);
 
           // Generate nickname
-          _nickname = customNickname ?? _generateFriendlyNickname();
+          _nickname = customNickname ?? generateFriendlyNickname();
           _addSystemMessage('${_t('using_nickname')} $_nickname');
 
+          // Register this Frontend user for encryption
+          final deviceId = _encryptionService.registerUser(_nickname!);
+          if (debugMode) {
+            _addSystemMessage('Registered for encrypted messaging: $deviceId');
+          }
+
           // Send connect command to backend
-          // Only nickname is sent - IRC server config comes from backend
-          _sendToBackend({'type': 'connect', 'nickname': _nickname});
+          // is_frontend_user: true indicates this is a Frontend user supporting encryption
+          _sendToBackend({
+            'type': 'connect',
+            'nickname': _nickname,
+            'is_frontend_user': true,
+          });
 
           _addSystemMessage(_t('sent_auth'));
         } catch (e, stackTrace) {
@@ -300,7 +356,11 @@ class IrcService {
     }
   }
 
-  void _handleBackendMessage(dynamic data) {
+  void _onMessageReceived(String data) {
+    _handleBackendMessage(data);
+  }
+
+  Future<void> _handleBackendMessage(dynamic data) async {
     try {
       final message = jsonDecode(data);
       final type = message['type'];
@@ -319,13 +379,86 @@ class IrcService {
           break;
 
         case 'message':
+          var content = message['content'] ?? '';
+          final isEncrypted = message['is_encrypted'] ?? false;
+          final sender = message['sender'] ?? 'Unknown';
+          final target = message['target'] ?? channel;
+          final isPrivate = message['is_private'] ?? false;
+
+          // If message is encrypted, try to decrypt it
+          if (isEncrypted && isPrivate && _nickname != null) {
+            final encryptedData = message['encrypted_data'];
+            if (encryptedData != null) {
+              // Try to decrypt with existing session
+              var decrypted = _encryptionService.decryptMessage(
+                sender,
+                _nickname!,
+                encryptedData,
+              );
+
+              // If decryption failed (no session), request session key from backend
+              if (decrypted == null) {
+                if (debugMode) {
+                  _addSystemMessage(
+                    '[Encryption] No session with $sender - requesting session key...',
+                  );
+                }
+
+                // Request session key from backend
+                _sendToBackend({'type': 'get_session_key', 'from': sender});
+
+                // Retry decryption multiple times with delays
+                // Total wait time: (100ms + 150ms) * 10 = 2.5 seconds for first message
+                // This ensures Backend has time to establish session and send key
+                for (int retry = 0; retry < 10; retry++) {
+                  // Longer initial wait for first message, shorter for retries
+                  final delay = retry == 0
+                      ? const Duration(milliseconds: 100)
+                      : const Duration(milliseconds: 150);
+
+                  await Future.delayed(delay);
+                  decrypted = _encryptionService.decryptMessage(
+                    sender,
+                    _nickname!,
+                    encryptedData,
+                  );
+                  if (decrypted != null) {
+                    if (debugMode) {
+                      _addSystemMessage(
+                        '[Encryption] Session key received after retry $retry',
+                      );
+                    }
+                    break;
+                  }
+                }
+              }
+
+              if (decrypted != null) {
+                content = decrypted;
+                if (debugMode) {
+                  _addSystemMessage(
+                    '[Encryption] Decrypted message from $sender',
+                  );
+                }
+              } else {
+                if (debugMode) {
+                  _addSystemMessage(
+                    '[Encryption] Failed to decrypt message from $sender - saving encrypted',
+                  );
+                }
+                content = '[Encrypted message - unable to decrypt]';
+              }
+            }
+          }
+
           _messageController.add(
             IrcMessage(
-              sender: message['sender'] ?? 'Unknown',
-              content: message['content'] ?? '',
-              target: message['target'] ?? channel,
+              sender: sender,
+              content: content,
+              target: target,
               timestamp: DateTime.now(),
-              isPrivate: message['is_private'] ?? false,
+              isPrivate: isPrivate,
+              isEncrypted: isEncrypted && isPrivate,
             ),
           );
           break;
@@ -352,6 +485,65 @@ class IrcService {
             _channelUsers.add(user);
             _usersController.add(List.from(_channelUsers));
             _addSystemMessage('$user ${_t('joined')}');
+          }
+          break;
+
+        case 'setup_encryption':
+          // Backend instructing this client to setup encryption with specific users
+          final users = message['users'] as List<dynamic>?;
+          if (users != null && _nickname != null) {
+            if (debugMode) {
+              _addSystemMessage(
+                '[Encryption] Backend instructing to setup encryption with: ${users.join(", ")}',
+              );
+            }
+
+            // Establish local encryption sessions for each user
+            for (final user in users) {
+              final userName = user as String;
+              _encryptionService.establishSession(_nickname!, userName);
+
+              // Notify Backend that we've established our local session
+              _sendToBackend({
+                'type': 'encryption_session_ready',
+                'with': userName,
+              });
+
+              if (debugMode) {
+                _addSystemMessage(
+                  '[Encryption] Established local session with $userName',
+                );
+              }
+            }
+          }
+          break;
+
+        case 'session_key':
+          // Received session key from backend
+          final from = message['from'] as String?;
+          final keyB64 = message['key'] as String?;
+          if (from != null && keyB64 != null && _nickname != null) {
+            try {
+              // Decode base64 key
+              final keyBytes = base64.decode(keyB64);
+              final key = encrypt.Key(keyBytes);
+
+              // Store in encryption service
+              final sessionKey = _getSessionKeyName(from, _nickname!);
+              _encryptionService.sessionKeys[sessionKey] = key;
+
+              if (debugMode) {
+                _addSystemMessage(
+                  '[Encryption] Received session key from $from',
+                );
+              }
+            } catch (e) {
+              if (debugMode) {
+                _addSystemMessage(
+                  '[Encryption] Failed to process session key from $from: $e',
+                );
+              }
+            }
           }
           break;
 
@@ -394,8 +586,8 @@ class IrcService {
     }
   }
 
-  void sendMessage(String message, {String? target}) {
-    if (!_isConnected) return;
+  Future<void> sendMessage(String message, {String? target}) async {
+    if (!_isConnected || _nickname == null) return;
 
     var recipient = target ?? channel;
 
@@ -404,19 +596,90 @@ class IrcService {
       recipient = recipient.substring(1);
     }
 
-    _sendToBackend({
-      'type': 'message',
-      'target': recipient,
-      'content': message,
-    });
+    // Check if this is a private message (not to channel)
+    final isPrivateMessage = recipient != channel;
+
+    if (isPrivateMessage) {
+      // Check if recipient is a Frontend user
+      final isFrontendUser = await checkIsFrontendUser(recipient);
+
+      if (isFrontendUser) {
+        // Check if encryption session with recipient exists
+        final sessionKey = _getSessionKeyName(_nickname!, recipient);
+
+        // If no encryption session, cannot send message - Backend must setup first
+        if (!_encryptionService.sessionKeys.containsKey(sessionKey)) {
+          if (debugMode) {
+            _addSystemMessage(
+              '[Encryption] Cannot send to $recipient - encryption session not ready',
+            );
+          }
+          return;
+        }
+
+        // Encrypt and send message
+        final encryptedData = _encryptionService.encryptMessage(
+          _nickname!,
+          recipient,
+          message,
+        );
+
+        if (encryptedData != null) {
+          // Send encrypted
+          _sendToBackend({
+            'type': 'message',
+            'target': recipient,
+            'content': message,
+            'is_encrypted': true,
+            'encrypted_data': encryptedData,
+          });
+
+          if (debugMode) {
+            _addSystemMessage(
+              '[Encryption] Encrypted message sent to $recipient',
+            );
+          }
+        } else {
+          // Message encrypt failed - don't send
+          debugPrint(
+            '[IrcService] Encryption failed for message to $recipient',
+          );
+        }
+      } else {
+        // Recipient is IRC user - send plain, never encrypt
+        _sendToBackend({
+          'type': 'message',
+          'target': recipient,
+          'content': message,
+          'is_encrypted': false,
+        });
+
+        if (debugMode) {
+          _addSystemMessage(
+            '[Encryption] Message to $recipient sent unencrypted (IRC user)',
+          );
+        }
+      }
+    } else {
+      // Public channel message - always unencrypted
+      _sendToBackend({
+        'type': 'message',
+        'target': recipient,
+        'content': message,
+        'is_encrypted': false,
+      });
+    }
   }
 
-  void sendPrivateMessage(String recipient, String message) {
-    sendMessage(message, target: recipient);
+  Future<void> sendPrivateMessage(String recipient, String message) async {
+    await sendMessage(message, target: recipient);
   }
 
-  void requestUserList() {
-    // User list is automatically received from backend
+  void establishSessionWithUser(String otherUser) {
+    if (_nickname != null) {
+      _encryptionService.establishSession(_nickname!, otherUser);
+      _sendToBackend({'type': 'establish_session', 'other_user': otherUser});
+    }
   }
 
   void disconnect() {
@@ -428,7 +691,12 @@ class IrcService {
       debugPrint('Error sending disconnect message: $e');
     }
 
-    _stopKeepaliveTimer();
+    // Clean up encryption sessions
+    if (_nickname != null) {
+      _encryptionService.cleanupUserSessions(_nickname!);
+    }
+
+    stopKeepaliveTimer();
 
     try {
       _channel?.sink.close();
@@ -444,8 +712,8 @@ class IrcService {
     _addSystemMessage(_t('disconnected'));
   }
 
-  void _startKeepaliveTimer() {
-    _stopKeepaliveTimer();
+  void startKeepaliveTimer() {
+    stopKeepaliveTimer();
     _keepaliveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_isConnected && _channel != null) {
         _sendToBackend({'type': 'ping'});
@@ -454,12 +722,12 @@ class IrcService {
     });
   }
 
-  void _stopKeepaliveTimer() {
+  void stopKeepaliveTimer() {
     _keepaliveTimer?.cancel();
     _keepaliveTimer = null;
   }
 
-  String _generateFriendlyNickname() {
+  String generateFriendlyNickname() {
     final adjectives = [
       'Happy',
       'Swift',
@@ -490,15 +758,21 @@ class IrcService {
   }
 
   String generateRandomNickname() {
-    return _generateFriendlyNickname();
+    return generateFriendlyNickname();
   }
 
   void dispose() {
     disconnect();
-    _stopKeepaliveTimer();
+    stopKeepaliveTimer();
+    _encryptionService.dispose();
     _messageController.close();
     _usersController.close();
     _connectionStateController.close();
+  }
+
+  String _getSessionKeyName(String user1, String user2) {
+    final users = [user1, user2]..sort();
+    return '${users[0]}_${users[1]}';
   }
 }
 
@@ -509,6 +783,7 @@ class IrcMessage {
   final DateTime timestamp;
   final bool isPrivate;
   final bool isSystem;
+  final bool isEncrypted;
 
   IrcMessage({
     required this.sender,
@@ -517,6 +792,7 @@ class IrcMessage {
     required this.timestamp,
     this.isPrivate = false,
     this.isSystem = false,
+    this.isEncrypted = false,
   });
 }
 

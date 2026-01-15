@@ -32,6 +32,299 @@ Client (Flutter) <--> WebSocket <--> Backend (Python) <--> IRC Server
 
 Backend acts as an **IRC Bridge**, relaying messages between WebSocket clients and IRC servers.
 
+## 💬 Message Communication Patterns
+
+### 1️⃣ Frontend User → Main Channel
+
+```
+Frontend User (Alice)
+        │
+        │ (plain text)
+        ↓
+    Backend
+        │
+        ├─→ IRC Server
+        │       └─→ All IRC Users
+        │
+        └─→ All other Frontend Users
+                └─→ Via WebSocket
+```
+
+**Characteristics:**
+- Frontend user sends message to main channel
+- Backend broadcasts to all IRC users and all connected Frontend clients
+- Messages are **NOT encrypted** (public channel)
+- Used for general communication visible to everyone
+
+---
+
+### 2️⃣ Frontend User → IRC User (Private Message)
+
+```
+Frontend User (Alice)           IRC User (Bob)
+        │                            ↑
+        │ (plain text)               │ (plain text)
+        ↓                            │
+    Backend ←──────────────────────→ IRC Server
+        
+    (IRC PRIVMSG protocol)
+```
+
+**Characteristics:**
+- Frontend user sends private message to IRC user
+- Backend relays via IRC PRIVMSG protocol
+- Messages are **NOT encrypted** (IRC doesn't support encryption)
+- IRC user can only respond via IRC server (if connected)
+- Messages are visible to IRC server administrator
+
+---
+
+### 3️⃣ Frontend User → Frontend User (Encrypted Private Message)
+
+```
+Frontend Alice                    Frontend Bob
+        │                            │
+        │ 1️⃣ Establish Session      │
+        │   (on connection)          │
+        │                            │
+        ├────→ Backend ←────────────┤
+        │   setup_encryption         │
+        │                            │
+        │ 2️⃣ Confirm Session Setup  │
+        │   encryption_session_ready │
+        ├────→ Backend ←────────────┤
+        │                            │
+        │ 3️⃣ Receive Session Key     │
+        │        session_key          │
+        ├────→ Backend ←────────────┤
+        │                            │
+        │ 4️⃣ Exchange Encrypted Msgs │
+        │   (AES-256-CBC)            │
+        ├───────────────────────────→│
+        │                            │
+```
+
+**Characteristics:**
+- **AES-256-CBC encryption** with per-session unique keys
+- Backend manages **all encryption setup** (server-driven model)
+- Session keys are **unique per user pair** (sorted names: `sorted([alice, bob])`)
+- Private messages between Frontend users are **always encrypted**
+- Encryption setup happens automatically **before first message** (prevents "first message problem")
+- Both parties can immediately send/receive encrypted messages
+
+---
+
+## 🔐 Encryption Setup Protocol
+
+### Initial State (Before Encryption)
+
+```
+Backend tracks:
+- Frontend Users: [Alice, Bob, Charlie]
+- Session Keys: {}
+- Pending Sessions: {}
+```
+
+### Step 1: Frontend User Connects
+
+```
+Alice connects to Backend
+         ↓
+Backend registers Alice as Frontend user
+         ↓
+Backend identifies unencrypted users for Alice: [Bob, Charlie]
+         ↓
+Backend sends setup_encryption message:
+{
+  "type": "setup_encryption",
+  "users": ["Bob", "Charlie"]
+}
+```
+
+**Backend Code:**
+```python
+# After user registers
+unencrypted_users = encryption_service.get_unencrypted_frontend_users(alice_nickname)
+# unencrypted_users = ["Bob", "Charlie"]
+
+send_to_frontend({
+    "type": "setup_encryption",
+    "users": unencrypted_users
+})
+```
+
+---
+
+### Step 2: Frontend Establishes Local Sessions
+
+```
+Alice receives setup_encryption message
+         ↓
+For each user in list (Bob, Charlie):
+    1. Establish local session in EncryptionService
+    2. Send encryption_session_ready confirmation to Backend
+         ↓
+Backend receives confirmations
+```
+
+**Frontend Code (Dart):**
+```dart
+case 'setup_encryption':
+  final users = message['users'] as List<dynamic>?;
+  if (users != null && _nickname != null) {
+    for (final user in users) {
+      final userName = user as String;
+      // Step 1: Establish local session
+      _encryptionService.establishSession(_nickname!, userName);
+      
+      // Step 2: Confirm to Backend
+      _sendToBackend({
+        'type': 'encryption_session_ready',
+        'with': userName,
+      });
+    }
+  }
+  break;
+```
+
+---
+
+### Step 3: Backend Verifies and Sends Session Key
+
+```
+Backend receives encryption_session_ready from Alice (with Bob)
+         ↓
+Backend establishes session: alice_bob (sorted names)
+         ↓
+Backend generates/retrieves session key
+         ↓
+Backend sends session_key message:
+{
+  "type": "session_key",
+  "session": "alice_bob",
+  "key": "<base64-encoded-key>"
+}
+         ↓
+Alice injects key into local EncryptionService
+```
+
+**Backend Code (Python):**
+```python
+@app.websocket("/ws")
+async def websocket_endpoint(websocket):
+    # Handle encryption_session_ready
+    elif message_type == "encryption_session_ready":
+        from_user = self.nickname
+        to_user = message['with']
+        
+        # Backend establishes session
+        encryption_service.establish_session(from_user, to_user)
+        
+        # Get sorted session name
+        users = sorted([from_user, to_user])
+        session_key_name = f"{users[0]}_{users[1]}"
+        
+        # Retrieve the session key
+        key = encryption_service.session_keys[session_key_name]
+        
+        # Send to Frontend
+        await self.send_to_client({
+            "type": "session_key",
+            "session": session_key_name,
+            "key": base64.b64encode(key).decode()
+        })
+```
+
+---
+
+### Step 4: Send Encrypted Message
+
+```
+Alice wants to send message to Bob
+         ↓
+Check: Does session alice_bob exist in EncryptionService?
+         ├─ NO  → Block message (return early)
+         └─ YES → Continue
+                    ↓
+                Encrypt message using AES-256-CBC
+                    ↓
+                Send encrypted payload to Backend
+                    ↓
+                Backend receives encrypted message
+                    ↓
+                Backend sends encrypted message to Bob
+                    ↓
+                Bob's Frontend EncryptionService decrypts
+                    ↓
+                Bob sees plain text message
+```
+
+**Frontend Code (Dart - sendMessage):**
+```dart
+void sendMessage(String target, String message) {
+  if (_nickname == null) return;
+
+  // For Frontend users - REQUIRE encryption
+  final sessionKey = _getSessionKeyName(_nickname!, target);
+  if (!_encryptionService.sessionKeys.containsKey(sessionKey)) {
+    // Cannot send - session not ready (blocks silently)
+    debugPrint('Session not ready for $target');
+    return;
+  }
+
+  // Session exists - encrypt and send
+  final encryptedMessage = _encryptionService.encryptMessage(
+    _nickname!,
+    target,
+    message,
+  );
+
+  if (encryptedMessage != null) {
+    _sendToBackend({
+      'type': 'message',
+      'target': target,
+      'content': encryptedMessage,
+      'is_encrypted': true,
+    });
+  }
+}
+```
+
+---
+
+## 🔑 Session Key Naming Convention
+
+Both Backend and Frontend use **identical session key format** for consistency:
+
+```
+Session Key = sorted([user1, user2]) joined with underscore
+
+Examples:
+- alice + bob    → sort → [alice, bob]   → "alice_bob"
+- bob + alice    → sort → [alice, bob]   → "alice_bob" (same!)
+- charlie + alice → sort → [alice, charlie] → "alice_charlie"
+```
+
+**Why sorted?**
+- Ensures **both directions** (alice→bob and bob→alice) use **same key**
+- Prevents "two different keys for same pair" problem
+- Works symmetrically: A can decrypt messages from B using same session key
+
+---
+
+## ✅ Encryption Guarantees
+
+| Feature | Frontend↔Frontend | Frontend↔IRC |
+|---------|------------------|--------------|
+| Encryption | ✅ AES-256-CBC | ❌ Plain text |
+| Session Keys | ✅ Pre-established | ❌ N/A |
+| Backend Setup | ✅ Automatic & Pro-active | ❌ N/A |
+| First Message Problem | ✅ Solved (setup before send) | ❌ N/A |
+| Bidirectional | ✅ Always works | ❌ One-way (IRC only) |
+| Private | ✅ End-to-end (Frontend controlled) | ⚠️ Visible to IRC admin |
+
+---
+
 ## 🚀 Quick Start
 
 ### Requirements
@@ -98,6 +391,8 @@ flutter run -d windows
 - [Backend README](Backend/README.md) - Python server documentation
 - [Frontend README](Frontend/geh_chat_frontend/README.md) - Flutter application documentation
 - [Communication Design](GehChat_Communication_Design.html) - Client-server communication documentation
+- **Message Communication Patterns** (above) - Detailed flow diagrams for all communication types
+- **Encryption Setup Protocol** (above) - Step-by-step encryption initialization guide
 
 ## 🛠️ Available VS Code Commands
 

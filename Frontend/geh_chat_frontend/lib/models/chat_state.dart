@@ -290,12 +290,12 @@ class ChatState extends ChangeNotifier {
     return _ircService.generateRandomNickname();
   }
 
-  void sendChannelMessage(String message) {
-    _ircService.sendMessage(message);
+  Future<void> sendChannelMessage(String message) async {
+    await _ircService.sendMessage(message);
   }
 
-  void sendPrivateMessage(String recipient, String message) {
-    _ircService.sendPrivateMessage(recipient, message);
+  Future<void> sendPrivateMessage(String recipient, String message) async {
+    await _ircService.sendPrivateMessage(recipient, message);
   }
 
   void startPrivateChat(String username) {

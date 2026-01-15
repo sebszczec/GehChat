@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
 import '../models/chat_state.dart';
 import '../services/irc_service.dart';
 import '../l10n/app_localizations.dart';
@@ -119,10 +120,13 @@ class _PrivateChatScreenState extends State<PrivateChatScreen> {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
 
-    context.read<ChatState>().sendPrivateMessage(widget.username, message);
     _messageController.clear();
-
     Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+
+    // Send message asynchronously, no need to await for UI purposes
+    unawaited(
+      context.read<ChatState>().sendPrivateMessage(widget.username, message),
+    );
   }
 
   @override
@@ -325,14 +329,32 @@ class _PrivateChatScreenState extends State<PrivateChatScreen> {
               ),
             ),
             const SizedBox(height: 2),
-            SelectableText(
-              time,
-              style: TextStyle(
-                fontSize: 10,
-                color: isOwnMessage
-                    ? Colors.white.withValues(alpha: 0.7)
-                    : Colors.grey,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SelectableText(
+                  time,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isOwnMessage
+                        ? Colors.white.withValues(alpha: 0.7)
+                        : Colors.grey,
+                  ),
+                ),
+                if (message.isEncrypted) ...[
+                  const SizedBox(width: 6),
+                  Tooltip(
+                    message: 'Wiadomość zaszyfrowana',
+                    child: Text(
+                      '🔒',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.green.shade300,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),

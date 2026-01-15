@@ -162,26 +162,26 @@ void main() {
       );
     });
 
-    test('sendPrivateMessage strips @ prefix from recipient', () {
+    test('sendPrivateMessage strips @ prefix from recipient', () async {
       // This test ensures that when sending a private message to @username,
       // the @ symbol is properly stripped before sending to backend
       final ircService = IrcService(backendUrl: 'ws://localhost:8000/ws');
 
       // We can't directly test WebSocket behavior without mocking,
       // but we can verify the method exists and accepts the parameter
-      expect(() {
-        ircService.sendPrivateMessage('@slaughOP', 'Hello!');
+      expect(() async {
+        await ircService.sendPrivateMessage('@slaughOP', 'Hello!');
       }, returnsNormally);
 
       ircService.dispose();
     });
 
-    test('sendMessage with @ prefix target removes prefix', () {
+    test('sendMessage with @ prefix target removes prefix', () async {
       final ircService = IrcService(backendUrl: 'ws://localhost:8000/ws');
 
       // Verify sendMessage accepts target with @ and processes it
-      expect(() {
-        ircService.sendMessage('Hello!', target: '@testuser');
+      expect(() async {
+        await ircService.sendMessage('Hello!', target: '@testuser');
       }, returnsNormally);
 
       ircService.dispose();

@@ -1,6 +1,6 @@
 """
 GehChat Backend Server
-Main application entry point - IRC Bridge
+Main application entry point - IRC Bridge with Signal Protocol Encryption
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -12,6 +12,7 @@ import json
 import socket
 from typing import Optional
 from config import get_irc_config, BACKEND_HOST, BACKEND_PORT
+from encryption_service import SignalProtocolService
 
 # Configure logging - DEBUG level to log everything
 logging.basicConfig(
@@ -28,8 +29,8 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="GehChat Backend",
-    description="Backend server for GehChat IRC client with IRC bridge",
-    version="0.2.0",
+    description="Backend server for GehChat IRC client with IRC bridge and Signal Protocol Encryption",
+    version="0.3.0",
 )
 
 # Configure CORS
@@ -40,6 +41,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global encryption service
+encryption_service = SignalProtocolService()
 
 
 # IRC Bridge manager
@@ -53,21 +57,60 @@ class IRCBridge:
         self.port = irc_config.port
         self.channel = irc_config.channel
         self.nickname = None
+        self.device_id = None
         self.connected = False
         self.reader_task = None
+        self.is_frontend_user = False  # Track if this is a Frontend user
 
-    async def connect_to_irc(self, server: str, port: int, channel: str, nickname: str):
+    async def connect_to_irc(
+        self,
+        server: str,
+        port: int,
+        channel: str,
+        nickname: str,
+        is_frontend_user: bool = True,
+    ):
         """Connect to IRC server"""
         try:
             self.server = server
             self.port = port
             self.channel = channel
             self.nickname = nickname
+            self.is_frontend_user = is_frontend_user
 
             logger.info(f"Connecting to IRC: {server}:{port}")
             logger.debug(
-                f"IRC connection params - Server: {server}, Port: {port}, Channel: {channel}, Nickname: {nickname}"
+                f"IRC connection params - Server: {server}, Port: {port}, Channel: {channel}, Nickname: {nickname}, Frontend User: {is_frontend_user}"
             )
+
+            # Register Frontend user for encryption
+            if is_frontend_user:
+                self.device_id = encryption_service.register_user(nickname)
+                logger.info(
+                    f"Registered Frontend user {nickname} with device_id {self.device_id}"
+                )
+
+                # Get list of other Frontend users to establish encryption with
+                other_frontend_users = (
+                    encryption_service.get_unencrypted_frontend_users(nickname)
+                )
+
+                if other_frontend_users:
+                    # Send list of users this Frontend should establish encryption with
+                    await self._send_to_client(
+                        {
+                            "type": "setup_encryption",
+                            "users": other_frontend_users,
+                        }
+                    )
+                    logger.info(
+                        f"Instructed {nickname} to setup encryption with {other_frontend_users}"
+                    )
+
+                    # Mark these sessions as pending
+                    for other_user in other_frontend_users:
+                        encryption_service.add_pending_session(nickname, other_user)
+                        encryption_service.add_pending_session(other_user, nickname)
 
             # Create socket connection
             logger.debug("Creating IRC socket connection...")
@@ -193,13 +236,35 @@ class IRCBridge:
             target = params[0] if params else ""
             message = line.split(":", 2)[2] if line.count(":") >= 2 else ""
 
+            # Check if message is encrypted JSON from Frontend user
+            is_encrypted = False
+            encrypted_data = None
+            content = message
+
+            try:
+                # Try to parse as encrypted message JSON
+                if message.startswith("{") and "encrypted_content" in message:
+                    encrypted_obj = json.loads(message)
+                    if "encrypted_content" in encrypted_obj and "iv" in encrypted_obj:
+                        is_encrypted = True
+                        encrypted_data = encrypted_obj
+                        content = "[Encrypted message]"
+                        logger.debug(
+                            f"Received encrypted message from {sender} to {target}"
+                        )
+            except (json.JSONDecodeError, ValueError):
+                # Message is not JSON - treat as plain text
+                pass
+
             await self._send_to_client(
                 {
                     "type": "message",
                     "sender": sender,
                     "target": target,
-                    "content": message,
+                    "content": content,
                     "is_private": target == self.nickname,
+                    "is_encrypted": is_encrypted,
+                    "encrypted_data": encrypted_data,
                 }
             )
 
@@ -241,13 +306,14 @@ class IRCBridge:
 
             # Only nickname comes from client
             nickname = data.get("nickname", "GehUser")
+            is_frontend_user = data.get("is_frontend_user", True)
 
             logger.info(f"Client requested connection with nickname: {nickname}")
             logger.debug(
                 f"Using IRC config - Server: {server}, Port: {port}, Channel: {channel}"
             )
 
-            await self.connect_to_irc(server, port, channel, nickname)
+            await self.connect_to_irc(server, port, channel, nickname, is_frontend_user)
 
         elif msg_type == "message":
             target = data.get("target", self.channel)
@@ -255,13 +321,32 @@ class IRCBridge:
             if target.startswith("@"):
                 target = target[1:]
             content = data.get("content", "")
+            is_encrypted = data.get("is_encrypted", False)
+            encrypted_data = data.get("encrypted_data", None)
+
             logger.debug(
-                f"Message request - Target: {target}, Content length: {len(content) if content else 0}"
+                f"Message request - Target: {target}, Content length: {len(content) if content else 0}, Encrypted: {is_encrypted}"
             )
 
             if self.connected:
-                logger.debug(f"Sending PRIVMSG to {target}")
-                self._send_irc(f"PRIVMSG {target} :{content}")
+                # Determine if this is a private message to a Frontend user
+                is_private = target != self.channel
+                should_send_encrypted = False
+
+                # If message is already encrypted (from Frontend user to Frontend user)
+                # and target is a Frontend user, relay the encrypted message
+                if is_encrypted and encrypted_data and is_private:
+                    # Frontend user is sending encrypted message
+                    logger.debug(
+                        f"Relaying encrypted message from {self.nickname} to {target}"
+                    )
+                    self._send_irc(f"PRIVMSG {target} :{json.dumps(encrypted_data)}")
+                    should_send_encrypted = True
+                else:
+                    # Plain message - either public chat or IRC user
+                    logger.debug(f"Sending plain PRIVMSG to {target}")
+                    self._send_irc(f"PRIVMSG {target} :{content}")
+
                 # Echo back to client
                 await self._send_to_client(
                     {
@@ -269,12 +354,97 @@ class IRCBridge:
                         "sender": self.nickname,
                         "target": target,
                         "content": content,
-                        "is_private": target != self.channel,
+                        "is_private": is_private,
+                        "is_encrypted": is_encrypted,
                     }
                 )
 
+        elif msg_type == "establish_session":
+            # Frontend users establishing encrypted session
+            other_user = data.get("other_user")
+            if self.nickname and other_user and self.is_frontend_user:
+                encryption_service.establish_session(self.nickname, other_user)
+                logger.info(
+                    f"Session established between {self.nickname} and {other_user}"
+                )
+                await self._send_to_client(
+                    {
+                        "type": "session_established",
+                        "content": f"Encrypted session established with {other_user}",
+                    }
+                )
+
+        elif msg_type == "get_session_key":
+            # Frontend user requesting session key with another user
+            from_user = data.get("from")
+            if self.nickname and from_user and self.is_frontend_user:
+                # Establish session if it doesn't exist yet
+                encryption_service.establish_session(from_user, self.nickname)
+
+                # Get the session key (sorted naming to match Frontend)
+                users = sorted([from_user, self.nickname])
+                session_key = f"{users[0]}_{users[1]}"
+
+                session_key_bytes = encryption_service.session_keys.get(session_key)
+
+                if session_key_bytes:
+                    import base64
+
+                    session_key_b64 = base64.b64encode(session_key_bytes).decode(
+                        "utf-8"
+                    )
+                    logger.debug(
+                        f"Sending session key from {from_user} to {self.nickname}"
+                    )
+                    await self._send_to_client(
+                        {
+                            "type": "session_key",
+                            "from": from_user,
+                            "key": session_key_b64,
+                        }
+                    )
+
+        elif msg_type == "encryption_session_ready":
+            # Frontend client confirmed it established local encryption session
+            other_user = data.get("with")
+            if self.nickname and other_user and self.is_frontend_user:
+                logger.info(
+                    f"Client {self.nickname} confirmed encryption session with {other_user}"
+                )
+
+                # Establish session on Backend side if not already done
+                encryption_service.establish_session(self.nickname, other_user)
+
+                # Send session key to this client for the other user
+                import base64
+
+                users = sorted([self.nickname, other_user])
+                session_key = f"{users[0]}_{users[1]}"
+
+                session_key_bytes = encryption_service.session_keys.get(session_key)
+                if session_key_bytes:
+                    session_key_b64 = base64.b64encode(session_key_bytes).decode(
+                        "utf-8"
+                    )
+                    await self._send_to_client(
+                        {
+                            "type": "session_key",
+                            "from": other_user,
+                            "key": session_key_b64,
+                        }
+                    )
+                    logger.debug(
+                        f"Sent session key to {self.nickname} for {other_user}"
+                    )
+
+                    # Mark session as confirmed
+                    encryption_service.mark_session_confirmed(self.nickname, other_user)
+
         elif msg_type == "disconnect":
             logger.info(f"Client {self.nickname} requested disconnect")
+            # Clean up encryption sessions
+            if self.nickname and self.is_frontend_user:
+                encryption_service.cleanup_session(self.nickname)
             await self.disconnect()
 
     async def disconnect(self):
@@ -330,6 +500,17 @@ async def get_irc_server_config():
         "server": irc_config.server,
         "port": irc_config.port,
         "channel": irc_config.channel,
+    }
+
+
+@app.get("/api/is-frontend-user/{nickname}")
+async def check_is_frontend_user(nickname: str):
+    """Check if a user is a Frontend user with active encryption sessions"""
+    is_frontend = encryption_service.is_frontend_user(nickname)
+    logger.debug(f"Frontend user check for {nickname}: {is_frontend}")
+    return {
+        "nickname": nickname,
+        "is_frontend_user": is_frontend,
     }
 
 

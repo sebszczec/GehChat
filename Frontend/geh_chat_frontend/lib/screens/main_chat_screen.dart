@@ -733,14 +733,32 @@ class _MainChatScreenState extends State<MainChatScreen>
               ),
             ),
             const SizedBox(height: 2),
-            SelectableText(
-              time,
-              style: TextStyle(
-                fontSize: 10,
-                color: isOwnMessage
-                    ? Colors.white.withValues(alpha: 0.7)
-                    : Colors.grey,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SelectableText(
+                  time,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isOwnMessage
+                        ? Colors.white.withValues(alpha: 0.7)
+                        : Colors.grey,
+                  ),
+                ),
+                if (message.isEncrypted) ...[
+                  const SizedBox(width: 6),
+                  Tooltip(
+                    message: 'Wiadomość zaszyfrowana',
+                    child: Text(
+                      '🔒',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.green.shade300,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
