@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocket
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import json
-from main import app, IRCBridge, bridges
+from main import app, bridges
+from irc_bridge import IRCBridge
+from encryption_service import SignalProtocolService
 
 
 @pytest.fixture
@@ -57,9 +59,14 @@ class TestHealthEndpoints:
 class TestIRCBridge:
     """Test IRCBridge class functionality"""
 
-    def test_irc_bridge_initialization(self):
+    @pytest.fixture
+    def encryption_service(self):
+        """Create encryption service for tests"""
+        return SignalProtocolService()
+
+    def test_irc_bridge_initialization(self, encryption_service):
         """Test IRCBridge initializes with correct defaults"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
 
         assert bridge.irc_socket is None
         assert bridge.websocket is None
@@ -70,31 +77,31 @@ class TestIRCBridge:
         assert bridge.connected is False
 
     @pytest.mark.asyncio
-    async def test_send_to_client_success(self):
+    async def test_send_to_client_success(self, encryption_service):
         """Test sending message to WebSocket client"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         mock_websocket = Mock(spec=WebSocket)
         mock_websocket.send_json = AsyncMock(return_value=None)
         bridge.websocket = mock_websocket
 
         test_data = {"type": "system", "content": "Test message"}
-        await bridge._send_to_client(test_data)
+        await bridge.send_to_client(test_data)
 
         mock_websocket.send_json.assert_called_once_with(test_data)
 
     @pytest.mark.asyncio
-    async def test_send_to_client_no_websocket(self):
+    async def test_send_to_client_no_websocket(self, encryption_service):
         """Test sending message when no WebSocket is connected"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
 
         # Should not raise exception even without websocket
         test_data = {"type": "system", "content": "Test message"}
-        await bridge._send_to_client(test_data)
+        await bridge.send_to_client(test_data)
 
     @pytest.mark.asyncio
-    async def test_handle_connect_message(self):
+    async def test_handle_connect_message(self, encryption_service):
         """Test handling connect message from client"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.websocket = AsyncMock(spec=WebSocket)
 
         with patch.object(
@@ -112,16 +119,16 @@ class TestIRCBridge:
             assert call_args[3] == "TestUser123"  # nickname
 
     @pytest.mark.asyncio
-    async def test_handle_message_when_connected(self):
+    async def test_handle_message_when_connected(self, encryption_service):
         """Test handling message when connected to IRC"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.connected = True
         bridge.nickname = "TestUser"
         bridge.channel = "#vorest"
         bridge.websocket = AsyncMock(spec=WebSocket)
         bridge.irc_socket = MagicMock()
 
-        with patch.object(bridge, "_send_irc") as mock_send_irc:
+        with patch.object(bridge, "send_irc_raw") as mock_send_irc:
             message_data = {
                 "type": "message",
                 "target": "#vorest",
@@ -133,16 +140,16 @@ class TestIRCBridge:
             mock_send_irc.assert_called_once_with("PRIVMSG #vorest :Hello, World!")
 
     @pytest.mark.asyncio
-    async def test_handle_private_message_strips_at_prefix(self):
+    async def test_handle_private_message_strips_at_prefix(self, encryption_service):
         """Test handling private message strips @ prefix from target"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.connected = True
         bridge.nickname = "TestUser"
         bridge.channel = "#vorest"
         bridge.websocket = AsyncMock(spec=WebSocket)
         bridge.irc_socket = MagicMock()
 
-        with patch.object(bridge, "_send_irc") as mock_send_irc:
+        with patch.object(bridge, "send_irc_raw") as mock_send_irc:
             message_data = {
                 "type": "message",
                 "target": "@slaughOP",  # Target with @ prefix
@@ -155,9 +162,9 @@ class TestIRCBridge:
             mock_send_irc.assert_called_once_with("PRIVMSG slaughOP :Hello slaughOP!")
 
     @pytest.mark.asyncio
-    async def test_handle_disconnect_message(self):
+    async def test_handle_disconnect_message(self, encryption_service):
         """Test handling disconnect message from client"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.websocket = AsyncMock(spec=WebSocket)
 
         with patch.object(
@@ -170,9 +177,9 @@ class TestIRCBridge:
             mock_disconnect.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_disconnect_cleanup(self):
+    async def test_disconnect_cleanup(self, encryption_service):
         """Test disconnect cleans up resources properly"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.connected = True
         bridge.irc_socket = MagicMock()
         bridge.reader_task = MagicMock()
@@ -185,33 +192,33 @@ class TestIRCBridge:
         assert bridge.irc_socket is None
         bridge.reader_task.cancel.assert_called_once()
 
-    def test_send_irc_message(self):
+    def test_send_irc_message(self, encryption_service):
         """Test sending message to IRC server"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         mock_socket = MagicMock()
         bridge.irc_socket = mock_socket
 
-        bridge._send_irc("NICK TestUser")
+        bridge.send_irc_raw("NICK TestUser")
 
         mock_socket.send.assert_called_once()
         sent_data = mock_socket.send.call_args[0][0]
         assert b"NICK TestUser\r\n" == sent_data
 
     @pytest.mark.asyncio
-    async def test_process_irc_ping(self):
+    async def test_process_irc_ping(self, encryption_service):
         """Test processing IRC PING command"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.irc_socket = MagicMock()
 
-        with patch.object(bridge, "_send_irc") as mock_send:
+        with patch.object(bridge, "send_irc_raw") as mock_send:
             await bridge._process_irc_line("PING :server.name")
 
             mock_send.assert_called_once_with("PONG :server.name")
 
     @pytest.mark.asyncio
-    async def test_process_irc_privmsg(self):
+    async def test_process_irc_privmsg(self, encryption_service):
         """Test processing IRC PRIVMSG"""
-        bridge = IRCBridge()
+        bridge = IRCBridge(encryption_service)
         bridge.nickname = "MyNick"
         mock_websocket = Mock(spec=WebSocket)
         mock_websocket.send_json = AsyncMock(return_value=None)
@@ -246,7 +253,7 @@ class TestWebSocketEndpoint:
             websocket.receive_json()
 
             # Send connect command
-            with patch("main.IRCBridge.connect_to_irc", new_callable=AsyncMock):
+            with patch("irc_bridge.IRCBridge.connect_to_irc", new_callable=AsyncMock):
                 websocket.send_json({"type": "connect", "nickname": "TestUser"})
 
                 # Allow processing
@@ -273,7 +280,8 @@ class TestAsyncFunctionality:
     @pytest.mark.asyncio
     async def test_parse_irc_names_strips_prefixes(self):
         """Test parsing NAMES reply strips @ and + prefixes from usernames"""
-        bridge = IRCBridge()
+        encryption_service = SignalProtocolService()
+        bridge = IRCBridge(encryption_service)
         bridge.connected = True
         bridge.nickname = "TestUser"
         bridge.channel = "#vorest"
@@ -281,7 +289,7 @@ class TestAsyncFunctionality:
         bridge.irc_socket = MagicMock()
 
         with patch.object(
-            bridge, "_send_to_client", new_callable=AsyncMock
+            bridge, "send_to_client", new_callable=AsyncMock
         ) as mock_send:
             # Simulate IRC NAMES reply with @ (operator) and + (voiced) prefixes
             # Format: :server 353 nick = #channel :@user1 +user2 user3
@@ -317,8 +325,9 @@ class TestAsyncFunctionality:
 
     async def test_concurrent_websocket_handling(self):
         """Test handling multiple WebSocket connections"""
-        bridge1 = IRCBridge()
-        bridge2 = IRCBridge()
+        encryption_service = SignalProtocolService()
+        bridge1 = IRCBridge(encryption_service)
+        bridge2 = IRCBridge(encryption_service)
 
         mock_ws1 = Mock(spec=WebSocket)
         mock_ws1.send_json = AsyncMock(return_value=None)
@@ -330,8 +339,8 @@ class TestAsyncFunctionality:
 
         # Send messages to both bridges concurrently
         await asyncio.gather(
-            bridge1._send_to_client({"type": "test1"}),
-            bridge2._send_to_client({"type": "test2"}),
+            bridge1.send_to_client({"type": "test1"}),
+            bridge2.send_to_client({"type": "test2"}),
         )
 
         mock_ws1.send_json.assert_called_once()
