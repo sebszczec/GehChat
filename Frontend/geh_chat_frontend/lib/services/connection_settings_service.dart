@@ -50,10 +50,10 @@ class ConnectionSettingsService {
     await prefs.setBool(_keyHasSavedSettings, true);
   }
 
-  /// Load saved connection settings
+  /// Load saved connection settings (only if auto-connect is expected)
   static Future<ConnectionSettings?> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     final hasSaved = prefs.getBool(_keyHasSavedSettings) ?? false;
     if (!hasSaved) {
       return null;
@@ -74,6 +74,12 @@ class ConnectionSettingsService {
       channel: channel,
       nickname: nickname,
     );
+  }
+
+  /// Load last used server and port (always returns values if stored, ignores hasSavedSettings flag)
+  static Future<({String? server, int? port})> loadLastServerAndPort() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (server: prefs.getString(_keyServer), port: prefs.getInt(_keyPort));
   }
 
   /// Check if there are saved settings
@@ -99,11 +105,19 @@ class ConnectionSettingsService {
     await prefs.setBool(_keyShouldAutoConnect, true);
   }
 
+  /// Disable auto-connect (preserves server settings but prevents auto-reconnect)
+  static Future<void> disableAutoConnect() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShouldAutoConnect, false);
+    await prefs.setBool(_keyHasSavedSettings, false);
+  }
+
   /// Check if user has enabled auto-connect
   static Future<bool> shouldAutoConnect() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_keyShouldAutoConnect) ?? false;
   }
+
   /// Save last used nickname separately (persists even after clearing full settings)
   static Future<void> saveLastNickname(String nickname) async {
     final prefs = await SharedPreferences.getInstance();
@@ -114,4 +128,5 @@ class ConnectionSettingsService {
   static Future<String?> loadLastNickname() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyNickname);
-  }}
+  }
+}

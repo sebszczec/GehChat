@@ -116,7 +116,8 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           action: SnackBarAction(
             label: 'OK',
             textColor: Colors.white,
-            onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+            onPressed: () =>
+                ScaffoldMessenger.of(context).hideCurrentSnackBar(),
           ),
         ),
       );
@@ -173,6 +174,17 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       _portController.text = savedSettings.port.toString();
       _nicknameController.text = savedSettings.nickname;
     } else {
+      // Try to load last used server/port even if full settings are not available
+      final lastServerAndPort =
+          await ConnectionSettingsService.loadLastServerAndPort();
+      if (lastServerAndPort.server != null &&
+          lastServerAndPort.server!.isNotEmpty) {
+        _serverController.text = lastServerAndPort.server!;
+      }
+      if (lastServerAndPort.port != null) {
+        _portController.text = lastServerAndPort.port.toString();
+      }
+
       final lastNickname = await ConnectionSettingsService.loadLastNickname();
       if (lastNickname != null && lastNickname.isNotEmpty) {
         _nicknameController.text = lastNickname;

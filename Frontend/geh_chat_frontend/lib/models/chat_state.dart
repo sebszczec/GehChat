@@ -344,9 +344,11 @@ class ChatState extends ChangeNotifier {
     _ircService.disconnect();
     _notificationService.hidePersistentNotification();
 
-    // Clear saved settings on manual disconnect
-    ConnectionSettingsService.clearSettings();
-    debugPrint('Connection settings cleared - manual disconnect');
+    // Disable auto-connect but preserve server settings for display
+    ConnectionSettingsService.disableAutoConnect();
+    debugPrint(
+      'Auto-connect disabled - manual disconnect (settings preserved)',
+    );
 
     _channelMessages.clear();
     _privateChats.clear();
