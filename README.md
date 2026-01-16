@@ -1,26 +1,52 @@
 # GehChat
 
-A complete IRC chat application with Python backend and Flutter frontend.
+A complete IRC chat application with Python backend and Flutter frontend, featuring end-to-end encryption for private messages between Frontend users.
 
 ## 🏗️ Architecture
 
 ```
 GehChat/
-├── Backend/              # Python FastAPI server - IRC Bridge
-│   ├── main.py          # Main server file - IRC Bridge
-│   ├── config.py        # Configuration (IRC, Backend)
-│   ├── requirements.txt # Python dependencies
-│   ├── .env.example     # Example configuration
-│   └── venv/            # Virtual environment
-└── Frontend/            # Flutter application
+├── Backend/                    # Python FastAPI server - IRC Bridge
+│   ├── main.py                # Main server file - FastAPI endpoints & WebSocket
+│   ├── config.py              # Configuration (IRC, Backend)
+│   ├── encryption_service.py  # AES-256-CBC encryption management
+│   ├── irc_bridge.py          # IRC connection & message handling
+│   ├── irc_parser.py          # IRC protocol parser
+│   ├── message_handlers.py    # WebSocket message handlers
+│   ├── requirements.txt       # Python dependencies
+│   ├── pytest.ini             # Test configuration
+│   ├── .env.example           # Example configuration
+│   ├── tests/                 # Unit tests (67 tests)
+│   └── venv/                  # Virtual environment
+└── Frontend/                   # Flutter application
     └── geh_chat_frontend/
-        ├── lib/         # Dart source code
-        │   ├── config/  # Configuration (backend_config.dart)
-        │   ├── services/ # Services (WebSocket IRC service)
-        │   └── ...
-        ├── android/     # Android configuration
-        ├── ios/         # iOS configuration
-        └── windows/     # Windows configuration
+        ├── lib/               # Dart source code
+        │   ├── config/        # Configuration (backend_config.dart)
+        │   ├── l10n/          # Localization files
+        │   ├── models/        # Data models (ChatState)
+        │   ├── screens/       # UI screens
+        │   │   ├── connection_screen.dart      # Connection settings
+        │   │   ├── main_chat_screen.dart       # Main channel chat
+        │   │   ├── private_chat_screen.dart    # Private messages
+        │   │   └── system_messages_screen.dart # System messages
+        │   ├── services/      # Services
+        │   │   ├── irc_service.dart            # Main IRC service
+        │   │   ├── irc_connection_manager.dart # WebSocket connection
+        │   │   ├── irc_message_handler.dart    # Message processing
+        │   │   ├── irc_translations.dart       # i18n (EN/PL)
+        │   │   ├── encryption_service.dart     # AES encryption
+        │   │   ├── notification_service.dart   # Push notifications
+        │   │   └── ...
+        │   ├── widgets/       # Reusable widgets
+        │   │   ├── message_bubble.dart         # Chat bubbles
+        │   │   ├── message_input.dart          # Input field
+        │   │   ├── users_overlay.dart          # Users list
+        │   │   └── ...
+        │   └── main.dart      # App entry point
+        ├── test/              # Unit tests (49 tests)
+        ├── android/           # Android configuration
+        ├── ios/               # iOS configuration
+        └── windows/           # Windows configuration
 ```
 
 ### Communication Flow
@@ -325,6 +351,43 @@ Examples:
 
 ---
 
+## 📱 Supported Platforms
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Windows | ✅ Full support | Primary development platform |
+| Android | ✅ Full support | Tested on emulator & devices |
+| Linux | ✅ Supported | Tested on Ubuntu |
+| macOS | ⚠️ Untested | Should work |
+| iOS | ⚠️ Untested | Should work |
+| Web | ⚠️ Limited | WebSocket support varies |
+
+---
+
+## 🌍 Internationalization (i18n)
+
+GehChat supports multiple languages with automatic detection based on device locale:
+
+| Language | Code | Status |
+|----------|------|--------|
+| English | `en` | ✅ Full support |
+| Polish | `pl` | ✅ Full support |
+
+### Translated UI Elements
+- Connection status messages
+- User join/leave notifications (displayed in main chat)
+- Error messages
+- System notifications
+
+### Join/Leave Notifications
+
+User activity is displayed directly in the main channel with styled bubbles:
+- **→ user joined the channel** (teal bubble)
+- **← user left the channel** (orange bubble)  
+- **← user quit** (orange bubble)
+
+---
+
 ## 🚀 Quick Start
 
 ### Requirements
@@ -390,6 +453,9 @@ flutter run -d windows
 
 - [Backend README](Backend/README.md) - Python server documentation
 - [Frontend README](Frontend/geh_chat_frontend/README.md) - Flutter application documentation
+- [Testing Guide](TESTING.md) - Detailed testing documentation
+- [Quick Start Guide](QUICKSTART.md) - Getting started quickly
+- [Android Setup](ANDROID_SETUP.md) - Android development setup
 - [Communication Design](GehChat_Communication_Design.html) - Client-server communication documentation
 - **Message Communication Patterns** (above) - Detailed flow diagrams for all communication types
 - **Encryption Setup Protocol** (above) - Step-by-step encryption initialization guide
@@ -400,6 +466,10 @@ flutter run -d windows
 - **Start Backend & Frontend** - Run the entire application
 - **Start Backend (Python)** - Backend only
 - **Start Frontend (Flutter)** - Frontend only
+- **Test All** - Run all tests (Backend + Frontend in parallel)
+- **Test Backend (pytest)** - Run backend tests only
+- **Test Frontend (Flutter)** - Run frontend tests only
+- **Test All with Coverage** - Generate coverage reports
 - **Install All Dependencies** - Install all dependencies
 - **Install Backend Dependencies** - Python dependencies only
 - **Install Frontend Dependencies** - Flutter dependencies only
@@ -457,13 +527,50 @@ User doesn't need to know IRC configuration details - everything is managed by t
 - **Socket** - Direct IRC connection
 - **Python 3.11+**
 - **Pydantic** - Validation and configuration
+- **pycryptodome** - AES-256-CBC encryption
+- **pytest** - Unit testing (67 tests)
 
 ### Frontend
-- **Flutter** - Cross-platform UI framework
+- **Flutter 3.0+** - Cross-platform UI framework
 - **Dart** - Programming language
 - **Provider** - State management
-- **WebSocket** - Backend communication
 - **web_socket_channel** - WebSocket for Flutter
+- **encrypt** - AES encryption (Dart)
+- **flutter_linkify** - URL detection in messages
+- **connectivity_plus** - Network monitoring
+- **flutter_local_notifications** - Push notifications
+- **flutter_test** - Unit testing (49 tests)
+
+---
+
+## 🧪 Testing
+
+### Run All Tests
+```bash
+# VS Code Task
+Ctrl+Shift+P → Tasks: Run Task → Test All
+```
+
+### Backend Tests (67 tests)
+```bash
+cd Backend
+.\venv\Scripts\activate
+pytest tests/ -v
+```
+
+### Frontend Tests (49 tests)
+```bash
+cd Frontend/geh_chat_frontend
+flutter test
+```
+
+### Test Coverage
+```bash
+# VS Code Task
+Ctrl+Shift+P → Tasks: Run Task → Test All with Coverage
+```
+
+---
 
 ## 🤝 Contributing
 

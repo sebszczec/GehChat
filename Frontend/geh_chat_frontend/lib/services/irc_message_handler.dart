@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'encryption_service.dart';
 import 'irc_service.dart';
+import 'irc_translations.dart';
 
 /// Handles incoming backend messages for IrcService
 /// Responsible for parsing and processing different message types
@@ -19,6 +21,12 @@ class IrcMessageHandler {
 
   String? _nickname;
   final List<String> channelUsers = [];
+
+  /// Check if current locale is Polish
+  bool get _isPolish {
+    final locale = kIsWeb ? 'en' : Platform.localeName.toLowerCase();
+    return locale.startsWith('pl');
+  }
 
   IrcMessageHandler({
     required this.encryptionService,
@@ -210,14 +218,19 @@ class IrcMessageHandler {
     channelUsers.addAll(users);
     updateUsers(List.from(channelUsers));
 
-    if (users.isNotEmpty) {
-      final usersList = users.join(', ');
-      addSystemMessage('Active users: $usersList');
-    }
-
     // Mark as fully connected
     updateConnectionState(IrcConnectionState.connected);
-    addSystemMessage('Successfully joined channel!');
+    addSystemMessage(
+      IrcTranslations.get('joined_channel', isPolish: _isPolish),
+    );
+
+    // Show active users as a channel message (visible in main chat)
+    if (users.isNotEmpty) {
+      final usersList = users.join(', ');
+      _addChannelInfoMessage(
+        '${IrcTranslations.get('active_users', isPolish: _isPolish)} $usersList',
+      );
+    }
   }
 
   void _handleJoin(Map<String, dynamic> message) {
@@ -225,7 +238,9 @@ class IrcMessageHandler {
     if (user != null && !channelUsers.contains(user)) {
       channelUsers.add(user);
       updateUsers(List.from(channelUsers));
-      addSystemMessage('$user joined the channel');
+      _addChannelInfoMessage(
+        '$user ${IrcTranslations.get('joined', isPolish: _isPolish)}',
+      );
     }
   }
 
@@ -288,8 +303,10 @@ class IrcMessageHandler {
     if (user != null) {
       channelUsers.remove(user);
       updateUsers(List.from(channelUsers));
-      final action = type == 'part' ? 'left the channel' : 'quit';
-      addSystemMessage('$user $action');
+      final action = type == 'part'
+          ? IrcTranslations.get('left', isPolish: _isPolish)
+          : IrcTranslations.get('quit', isPolish: _isPolish);
+      _addChannelInfoMessage('$user $action', isLeaving: true);
     }
   }
 
@@ -305,5 +322,20 @@ class IrcMessageHandler {
   String _getSessionKeyName(String user1, String user2) {
     final users = [user1, user2]..sort();
     return '${users[0]}_${users[1]}';
+  }
+
+  /// Add a channel info message (not system, visible in main chat)
+  /// [isLeaving] - if true, uses left arrow (←) for leave/quit messages
+  void _addChannelInfoMessage(String content, {bool isLeaving = false}) {
+    addMessage(
+      IrcMessage(
+        sender: isLeaving ? '←' : '→',
+        content: content,
+        target: channel,
+        timestamp: DateTime.now(),
+        isPrivate: false,
+        isSystem: false,
+      ),
+    );
   }
 }

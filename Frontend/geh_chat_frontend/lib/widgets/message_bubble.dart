@@ -27,6 +27,11 @@ class MessageBubble extends StatelessWidget {
       return _buildSystemMessage(context, formattedTime);
     }
 
+    // Info message style (join/leave notifications with → or ←)
+    if (message.sender == '→' || message.sender == '←') {
+      return _buildInfoMessage(context, formattedTime);
+    }
+
     return _buildUserMessage(context, isOwnMessage, formattedTime);
   }
 
@@ -53,6 +58,55 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
           ),
+          SelectableText(
+            time,
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build info message for join/leave notifications
+  Widget _buildInfoMessage(BuildContext context, String time) {
+    final isLeaving = message.sender == '←';
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isLeaving
+            ? Colors.orange.shade900.withValues(alpha: 0.3)
+            : Colors.teal.shade900.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isLeaving
+              ? Colors.orange.shade700.withValues(alpha: 0.5)
+              : Colors.teal.shade700.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            message.sender,
+            style: TextStyle(
+              fontSize: 14,
+              color: isLeaving ? Colors.orange.shade300 : Colors.teal.shade300,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: SelectableText(
+              message.content,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade300,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           SelectableText(
             time,
             style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
