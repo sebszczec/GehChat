@@ -517,8 +517,14 @@ async def check_is_frontend_user(nickname: str):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for IRC bridge"""
+    logger.info(f"WebSocket connection attempt from {websocket.client}")
+    logger.debug(
+        f"WebSocket details - Client IP: {websocket.client[0]}, Port: {websocket.client[1]}"
+    )
+
     await websocket.accept()
     logger.debug(f"WebSocket connection accepted from {websocket.client}")
+    logger.info(f"WebSocket ACCEPTED from {websocket.client[0]}")
 
     # Create IRC bridge for this connection
     bridge = IRCBridge()

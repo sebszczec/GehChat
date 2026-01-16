@@ -193,15 +193,16 @@ class IrcService {
           WebSocketChannel? channel;
           try {
             // Use timeout to catch connection refused errors early
+            // Increased to 15 seconds for slower mobile networks (Android emulator: 10.0.2.2)
             channel =
                 await Future.value(
                   WebSocketChannel.connect(Uri.parse(backendUrl)),
                 ).timeout(
-                  const Duration(seconds: 5),
+                  const Duration(seconds: 15),
                   onTimeout: () {
                     throw TimeoutException(
                       'WebSocket connection timeout',
-                      const Duration(seconds: 5),
+                      const Duration(seconds: 15),
                     );
                   },
                 );
