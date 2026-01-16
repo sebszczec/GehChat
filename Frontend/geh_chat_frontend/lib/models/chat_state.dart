@@ -15,7 +15,9 @@ class ChatState extends ChangeNotifier {
   List<String> _users = [];
   IrcConnectionState _connectionState = IrcConnectionState.disconnected;
   Timer? _reconnectTimer;
+  // ignore: unused_field
   bool _shouldAutoReconnect = false;
+  // ignore: unused_field
   bool _wasConnected = false;
   String? _activeChat; // null = main channel, username = private chat
   AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;

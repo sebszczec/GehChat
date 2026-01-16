@@ -9,8 +9,10 @@ import '../services/irc_service.dart';
 import '../l10n/app_localizations.dart';
 import '../services/connection_settings_service.dart';
 import '../config/backend_config.dart';
+import '../utils/network_validator.dart';
 import 'main_chat_screen.dart';
 
+/// Screen for configuring and initiating connection to the IRC backend
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
 
@@ -26,74 +28,79 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     text: BackendConfig.defaultPort.toString(),
   );
   final TextEditingController _nicknameController = TextEditingController();
+
   bool _isConnecting = false;
   bool _isAborted = false;
   bool _debugMode = false;
+
   StreamSubscription<IrcConnectionState>? _connectionStateSubscription;
   Timer? _connectionSuccessTimer;
 
   @override
   void initState() {
     super.initState();
-    // Check if already connected and navigate or load settings
-    _checkConnectionAndNavigate();
+    _loadSavedSettings();
+    _setupConnectionStateListener();
+  }
 
-    // Listen to connection state changes
+  void _loadSavedSettings() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _checkConnectionAndNavigate();
+    });
+  }
+
+  void _setupConnectionStateListener() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         final chatState = context.read<ChatState>();
-        _connectionStateSubscription = chatState.connectionStateStream.listen((
-          state,
-        ) {
-          if (mounted) {
-            if (_isConnecting) {
-              if (state == IrcConnectionState.error ||
-                  state == IrcConnectionState.disconnected) {
-                // Connection failed - reset the connecting flag
-                _connectionSuccessTimer?.cancel();
-                setState(() {
-                  _isConnecting = false;
-                });
-
-                // Show error message to user only if not aborted
-                if (!_isAborted) {
-                  _showConnectionErrorMessage(chatState);
-                }
-                _isAborted = false; // Reset abort flag
-              } else if (state == IrcConnectionState.connected) {
-                // Connection successful - cancel timer and navigate
-                _connectionSuccessTimer?.cancel();
-                setState(() {
-                  _isConnecting = false;
-                });
-
-                // Save settings on successful connection only if not aborted
-                if (!_isAborted) {
-                  _saveConnectionSettingsAndNavigate(chatState);
-                }
-                _isAborted = false; // Reset abort flag
-              }
-            }
-          }
-        });
+        _connectionStateSubscription = chatState.connectionStateStream.listen(
+          _handleConnectionStateChange,
+        );
       }
     });
   }
 
-  void _showConnectionErrorMessage(ChatState chatState) {
-    // Get the last system message which contains the error
+  void _handleConnectionStateChange(IrcConnectionState state) {
+    if (!mounted || !_isConnecting) return;
+
+    if (state == IrcConnectionState.error ||
+        state == IrcConnectionState.disconnected) {
+      _handleConnectionFailed();
+    } else if (state == IrcConnectionState.connected) {
+      _handleConnectionSuccess();
+    }
+  }
+
+  void _handleConnectionFailed() {
+    _connectionSuccessTimer?.cancel();
+    setState(() => _isConnecting = false);
+
+    if (!_isAborted) {
+      _showConnectionErrorMessage();
+    }
+    _isAborted = false;
+  }
+
+  void _handleConnectionSuccess() {
+    _connectionSuccessTimer?.cancel();
+    setState(() => _isConnecting = false);
+
+    if (!_isAborted) {
+      _saveConnectionSettingsAndNavigate();
+    }
+    _isAborted = false;
+  }
+
+  void _showConnectionErrorMessage() {
+    final chatState = context.read<ChatState>();
     final systemMessages = chatState.systemMessages;
     String errorMessage = AppLocalizations.of(context).connectionFailed;
 
     if (systemMessages.isNotEmpty) {
-      // Find the last error-related message
       for (int i = systemMessages.length - 1; i >= 0; i--) {
         final msg = systemMessages[i].content.toLowerCase();
-        if (msg.contains('error') ||
-            msg.contains('refused') ||
-            msg.contains('timeout') ||
-            msg.contains('connection') ||
-            msg.contains('network')) {
+        if (_isErrorMessage(msg)) {
           errorMessage = systemMessages[i].content;
           break;
         }
@@ -109,18 +116,25 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           action: SnackBarAction(
             label: 'OK',
             textColor: Colors.white,
-            onPressed: () {
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-            },
+            onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
           ),
         ),
       );
     }
   }
 
-  Future<void> _saveConnectionSettingsAndNavigate(ChatState chatState) async {
+  bool _isErrorMessage(String msg) {
+    return msg.contains('error') ||
+        msg.contains('refused') ||
+        msg.contains('timeout') ||
+        msg.contains('connection') ||
+        msg.contains('network');
+  }
+
+  Future<void> _saveConnectionSettingsAndNavigate() async {
     try {
-      // Save settings on successful connection
+      final chatState = context.read<ChatState>();
+
       await ConnectionSettingsService.saveSettings(
         ConnectionSettings(
           server: _serverController.text.trim(),
@@ -130,7 +144,6 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
         ),
       );
 
-      // Also save nickname separately so it persists even if other settings are cleared
       await ConnectionSettingsService.saveLastNickname(
         _nicknameController.text.trim(),
       );
@@ -149,27 +162,21 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     }
   }
 
-  // Load saved settings to show in UI
   Future<void> _checkConnectionAndNavigate() async {
     if (!mounted) return;
 
     final chatState = context.read<ChatState>();
-
-    // Load saved settings to show in UI (but never auto-connect)
     final savedSettings = await ConnectionSettingsService.loadSettings();
 
     if (savedSettings != null) {
-      // Populate fields with saved settings (user must click Connect manually)
       _serverController.text = savedSettings.server;
       _portController.text = savedSettings.port.toString();
       _nicknameController.text = savedSettings.nickname;
     } else {
-      // If no full settings, still try to load last used nickname
       final lastNickname = await ConnectionSettingsService.loadLastNickname();
       if (lastNickname != null && lastNickname.isNotEmpty) {
         _nicknameController.text = lastNickname;
       } else {
-        // Generate random nickname only if no nickname was ever saved
         _nicknameController.text = chatState.generateRandomNickname();
       }
     }
@@ -185,175 +192,133 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     super.dispose();
   }
 
-  bool _isValidIpOrDomain(String server) {
-    // IPv4 pattern - matches any IP address format with 4 octets
-    final ipv4Pattern = RegExp(r'^(\d{1,3}\.){3}\d{1,3}$');
-
-    // Hostname/domain pattern (alphanumeric, dots, hyphens)
-    final domainPattern = RegExp(
-      r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$',
-    );
-
-    // localhost is always valid
-    if (server.toLowerCase() == 'localhost' || server == '127.0.0.1') {
-      return true;
-    }
-
-    // Check if it's a valid IPv4 (including special IPs like 10.0.2.2 for Android emulator)
-    if (ipv4Pattern.hasMatch(server)) {
-      final parts = server.split('.');
-      // For IPv4, we accept any value 0-255 in each octet
-      // This includes special IPs like 10.0.2.2 (Android emulator gateway)
-      for (var part in parts) {
-        final num = int.tryParse(part);
-        if (num == null || num < 0 || num > 255) {
-          return false;
-        }
-      }
-      return true;
-    }
-
-    // Check if it's a valid domain/hostname
-    if (domainPattern.hasMatch(server)) {
-      return true;
-    }
-
-    return false;
-  }
-
   Future<void> _connect() async {
     if (_isConnecting) return;
 
+    final loc = AppLocalizations.of(context);
     final server = _serverController.text.trim();
     final portStr = _portController.text.trim();
     final nickname = _nicknameController.text.trim();
 
-    if (server.isEmpty || portStr.isEmpty || nickname.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).pleaseFillAllFields),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+    // Validate inputs
+    if (!_validateInputs(loc, server, portStr, nickname)) {
       return;
     }
 
-    // Validate IP address or domain
-    if (!_isValidIpOrDomain(server)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).invalidIpAddress),
-          duration: const Duration(seconds: 3),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
+    final port = NetworkValidator.parsePort(portStr)!;
 
-    final port = int.tryParse(portStr);
-    if (port == null || port < 1 || port > 65535) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).invalidPortNumber),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isConnecting = true;
-    });
+    setState(() => _isConnecting = true);
 
     try {
-      // Fetch IRC configuration from backend with timeout
-      String channel = '#vorest'; // Default channel
-
-      try {
-        final ircConfigUrl = BackendConfig.getIrcConfigUrl(server, port);
-
-        final response = await http
-            .get(Uri.parse(ircConfigUrl))
-            .timeout(const Duration(seconds: 10));
-
-        if (response.statusCode == 200) {
-          final config = json.decode(response.body);
-          channel = config['channel'] ?? '#vorest';
-        } else {
-          // If config fetch fails, use default channel and continue
-          // This allows connection on Android emulator where config fetch might fail
-          // but WebSocket connection might still work
-          debugPrint(
-            'Warning: Failed to fetch IRC config: ${response.statusCode}, using default channel',
-          );
-        }
-      } on SocketException catch (e) {
-        // For Android emulator (10.0.2.2), HTTP might fail but WebSocket could work
-        // Try to connect anyway with default channel
-        debugPrint(
-          'Warning: Socket error fetching config: $e, attempting connection with default channel',
-        );
-      } on TimeoutException catch (_) {
-        // HTTP request timeout - try with default channel anyway
-        debugPrint(
-          'Warning: HTTP config fetch timeout, attempting connection with default channel',
-        );
-      } catch (e) {
-        // Any other error - try with default channel
-        debugPrint(
-          'Warning: Error fetching IRC config: $e, attempting connection with default channel',
-        );
-      }
-
+      final channel = await _fetchIrcConfig(server, port);
       if (!mounted) return;
 
-      final chatState = context.read<ChatState>();
-
-      // Start connection asynchronously - don't wait for it to complete
-      // The connectionStateStream listener will handle navigation
-      chatState
-          .connectWithSettings(
-            server: server,
-            port: port,
-            channel: channel,
-            nickname: nickname,
-            debugMode: _debugMode,
-          )
-          .catchError((e) {
-            // Catch any synchronous errors from connectWithSettings
-            if (mounted) {
-              debugPrint('Connection error: $e');
-              setState(() {
-                _isConnecting = false;
-              });
-              // Disconnect if connection failed
-              chatState.disconnect();
-            }
-          });
-
-      // Start a timer waiting for connection success
-      // If user clicks Abort, this timer will be cancelled
-      _connectionSuccessTimer = Timer.periodic(const Duration(milliseconds: 100), (
-        timer,
-      ) {
-        // Timer just waits - actual navigation happens via connectionStateStream listener
-        // This timer will be cancelled when connection succeeds/fails or user clicks Abort
-      });
+      _startConnection(server, port, channel, nickname);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isConnecting = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${AppLocalizations.of(context).connectionFailed}: $e',
-            ),
-            duration: const Duration(seconds: 3),
-            backgroundColor: Colors.red,
-          ),
+      _handleConnectError(e);
+    }
+  }
+
+  bool _validateInputs(
+    AppLocalizations loc,
+    String server,
+    String portStr,
+    String nickname,
+  ) {
+    if (server.isEmpty || portStr.isEmpty || nickname.isEmpty) {
+      _showSnackBar(loc.pleaseFillAllFields);
+      return false;
+    }
+
+    if (!NetworkValidator.isValidIpOrDomain(server)) {
+      _showSnackBar(loc.invalidIpAddress, isError: true);
+      return false;
+    }
+
+    if (!NetworkValidator.isValidPort(portStr)) {
+      _showSnackBar(loc.invalidPortNumber);
+      return false;
+    }
+
+    return true;
+  }
+
+  void _showSnackBar(String message, {bool isError = false, int seconds = 2}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: Duration(seconds: seconds),
+        backgroundColor: isError ? Colors.red : null,
+      ),
+    );
+  }
+
+  Future<String> _fetchIrcConfig(String server, int port) async {
+    String channel = '#vorest';
+
+    try {
+      final ircConfigUrl = BackendConfig.getIrcConfigUrl(server, port);
+      final response = await http
+          .get(Uri.parse(ircConfigUrl))
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final config = json.decode(response.body);
+        channel = config['channel'] ?? '#vorest';
+      } else {
+        debugPrint(
+          'Warning: Failed to fetch IRC config: ${response.statusCode}',
         );
       }
+    } on SocketException catch (e) {
+      debugPrint('Warning: Socket error fetching config: $e');
+    } on TimeoutException catch (_) {
+      debugPrint('Warning: HTTP config fetch timeout');
+    } catch (e) {
+      debugPrint('Warning: Error fetching IRC config: $e');
+    }
+
+    return channel;
+  }
+
+  void _startConnection(
+    String server,
+    int port,
+    String channel,
+    String nickname,
+  ) {
+    final chatState = context.read<ChatState>();
+
+    chatState
+        .connectWithSettings(
+          server: server,
+          port: port,
+          channel: channel,
+          nickname: nickname,
+          debugMode: _debugMode,
+        )
+        .catchError((e) {
+          if (mounted) {
+            debugPrint('Connection error: $e');
+            setState(() => _isConnecting = false);
+            chatState.disconnect();
+          }
+        });
+
+    _connectionSuccessTimer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) {},
+    );
+  }
+
+  void _handleConnectError(dynamic e) {
+    if (mounted) {
+      setState(() => _isConnecting = false);
+      _showSnackBar(
+        '${AppLocalizations.of(context).connectionFailed}: $e',
+        isError: true,
+        seconds: 3,
+      );
     }
   }
 
@@ -367,25 +332,13 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   void _abortConnection() {
     final chatState = context.read<ChatState>();
 
-    // Mark connection as aborted to prevent error messages
     _isAborted = true;
-
-    // Cancel the connection success timer
     _connectionSuccessTimer?.cancel();
-
-    // Disconnect from IRC service
     chatState.disconnect();
 
-    setState(() {
-      _isConnecting = false;
-    });
+    setState(() => _isConnecting = false);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(AppLocalizations.of(context).connectionAborted),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    _showSnackBar(AppLocalizations.of(context).connectionAborted);
   }
 
   @override
@@ -403,123 +356,136 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.chat_bubble_outline,
-                  size: 80,
-                  color: Theme.of(context).primaryColor,
-                ),
-                const SizedBox(height: 32),
-                Text(
-                  loc.welcomeToGehChat,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  loc.configureConnectionSettings,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
+                _buildHeader(loc),
                 const SizedBox(height: 48),
-                TextField(
-                  controller: _serverController,
-                  decoration: InputDecoration(
-                    labelText: loc.backendServer,
-                    prefixIcon: const Icon(Icons.dns),
-                    border: const OutlineInputBorder(),
-                    hintText: 'localhost',
-                  ),
-                  enabled: !_isConnecting,
-                ),
+                _buildServerInput(loc),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: _portController,
-                  decoration: InputDecoration(
-                    labelText: loc.backendPort,
-                    prefixIcon: const Icon(Icons.numbers),
-                    border: const OutlineInputBorder(),
-                    hintText: '8000',
-                  ),
-                  keyboardType: TextInputType.number,
-                  enabled: !_isConnecting,
-                ),
+                _buildPortInput(loc),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _nicknameController,
-                        decoration: InputDecoration(
-                          labelText: loc.nickname,
-                          prefixIcon: const Icon(Icons.person),
-                          border: const OutlineInputBorder(),
-                        ),
-                        enabled: !_isConnecting,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      onPressed: _isConnecting ? null : _generateNewNickname,
-                      icon: const Icon(Icons.refresh),
-                      tooltip: loc.generateNewNickname,
-                    ),
-                  ],
-                ),
+                _buildNicknameInput(loc),
                 const SizedBox(height: 24),
-                CheckboxListTile(
-                  title: Text(loc.debugLogLevel),
-                  subtitle: Text(
-                    loc.showAllIrcMessages,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  value: _debugMode,
-                  onChanged: _isConnecting
-                      ? null
-                      : (value) {
-                          setState(() {
-                            _debugMode = value ?? false;
-                          });
-                        },
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
+                _buildDebugCheckbox(loc),
                 const SizedBox(height: 8),
-                if (_isConnecting)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _abortConnection,
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            backgroundColor: Colors.red,
-                          ),
-                          child: Text(
-                            loc.abort,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  ElevatedButton(
-                    onPressed: _connect,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: Text(
-                      loc.connect,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ),
+                _buildConnectButton(loc),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildHeader(AppLocalizations loc) {
+    return Column(
+      children: [
+        Icon(
+          Icons.chat_bubble_outline,
+          size: 80,
+          color: Theme.of(context).primaryColor,
+        ),
+        const SizedBox(height: 32),
+        Text(
+          loc.welcomeToGehChat,
+          style: Theme.of(context).textTheme.headlineMedium,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          loc.configureConnectionSettings,
+          style: Theme.of(context).textTheme.bodyMedium,
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildServerInput(AppLocalizations loc) {
+    return TextField(
+      controller: _serverController,
+      decoration: InputDecoration(
+        labelText: loc.backendServer,
+        prefixIcon: const Icon(Icons.dns),
+        border: const OutlineInputBorder(),
+        hintText: 'localhost',
+      ),
+      enabled: !_isConnecting,
+    );
+  }
+
+  Widget _buildPortInput(AppLocalizations loc) {
+    return TextField(
+      controller: _portController,
+      decoration: InputDecoration(
+        labelText: loc.backendPort,
+        prefixIcon: const Icon(Icons.numbers),
+        border: const OutlineInputBorder(),
+        hintText: '8000',
+      ),
+      keyboardType: TextInputType.number,
+      enabled: !_isConnecting,
+    );
+  }
+
+  Widget _buildNicknameInput(AppLocalizations loc) {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _nicknameController,
+            decoration: InputDecoration(
+              labelText: loc.nickname,
+              prefixIcon: const Icon(Icons.person),
+              border: const OutlineInputBorder(),
+            ),
+            enabled: !_isConnecting,
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: _isConnecting ? null : _generateNewNickname,
+          icon: const Icon(Icons.refresh),
+          tooltip: loc.generateNewNickname,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDebugCheckbox(AppLocalizations loc) {
+    return CheckboxListTile(
+      title: Text(loc.debugLogLevel),
+      subtitle: Text(
+        loc.showAllIrcMessages,
+        style: const TextStyle(fontSize: 12),
+      ),
+      value: _debugMode,
+      onChanged: _isConnecting
+          ? null
+          : (value) => setState(() => _debugMode = value ?? false),
+      controlAffinity: ListTileControlAffinity.leading,
+    );
+  }
+
+  Widget _buildConnectButton(AppLocalizations loc) {
+    if (_isConnecting) {
+      return ElevatedButton(
+        onPressed: _abortConnection,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          backgroundColor: Colors.red,
+        ),
+        child: Text(
+          loc.abort,
+          style: const TextStyle(fontSize: 16, color: Colors.white),
+        ),
+      );
+    }
+
+    return ElevatedButton(
+      onPressed: _connect,
+      style: ElevatedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+      ),
+      child: Text(loc.connect, style: const TextStyle(fontSize: 16)),
     );
   }
 }
