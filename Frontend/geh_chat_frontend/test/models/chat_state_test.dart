@@ -71,5 +71,10 @@ void main() {
     test('unreadCounts is empty initially', () {
       expect(chatState.unreadCounts, isEmpty);
     });
+
+    test('hasEncryptedSession delegates to irc service', () {
+      // When not connected, hasEncryptedSession should return false
+      expect(chatState.hasEncryptedSession('someUser'), isFalse);
+    });
   });
 }

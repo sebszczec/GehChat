@@ -8,6 +8,7 @@ class UsersOverlay extends StatelessWidget {
   final String currentNickname;
   final VoidCallback onClose;
   final void Function(String username) onStartPrivateChat;
+  final bool Function(String username) hasEncryptedSession;
 
   const UsersOverlay({
     super.key,
@@ -15,6 +16,7 @@ class UsersOverlay extends StatelessWidget {
     required this.currentNickname,
     required this.onClose,
     required this.onStartPrivateChat,
+    required this.hasEncryptedSession,
   });
 
   @override
@@ -69,6 +71,8 @@ class UsersOverlay extends StatelessWidget {
   }
 
   Widget _buildUserTile(BuildContext context, String user) {
+    final isEncrypted = hasEncryptedSession(user);
+
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: Theme.of(context).primaryColor,
@@ -78,6 +82,12 @@ class UsersOverlay extends StatelessWidget {
         ),
       ),
       title: Text(user),
+      trailing: isEncrypted
+          ? Tooltip(
+              message: AppLocalizations.of(context).encryptedConnection,
+              child: Icon(Icons.lock, size: 20, color: Colors.green[600]),
+            )
+          : null,
       onTap: () {
         onStartPrivateChat(user);
         Navigator.push(

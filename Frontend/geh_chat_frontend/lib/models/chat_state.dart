@@ -76,6 +76,11 @@ class ChatState extends ChangeNotifier {
   String get channel => _ircService.channel;
   String? get activeChat => _activeChat;
 
+  /// Check if there's an encrypted session with a given user
+  bool hasEncryptedSession(String otherUser) {
+    return _ircService.hasEncryptedSession(otherUser);
+  }
+
   // Get only system messages
   List<IrcMessage> get systemMessages =>
       _channelMessages.where((msg) => msg.isSystem).toList();

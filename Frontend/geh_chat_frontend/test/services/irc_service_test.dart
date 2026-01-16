@@ -186,5 +186,14 @@ void main() {
 
       ircService.dispose();
     });
+
+    test('hasEncryptedSession returns false when not connected', () {
+      final ircService = IrcService(backendUrl: 'ws://localhost:8000/ws');
+
+      // When nickname is null (not connected), should return false
+      expect(ircService.hasEncryptedSession('someUser'), isFalse);
+
+      ircService.dispose();
+    });
   });
 }

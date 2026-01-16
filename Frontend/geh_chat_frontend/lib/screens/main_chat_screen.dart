@@ -144,6 +144,7 @@ class _MainChatScreenState extends State<MainChatScreen>
               currentNickname: chatState.nickname,
               onClose: () => setState(() => _showUsers = false),
               onStartPrivateChat: chatState.startPrivateChat,
+              hasEncryptedSession: chatState.hasEncryptedSession,
             ),
           if (_showPrivateChats)
             PrivateChatsOverlay(

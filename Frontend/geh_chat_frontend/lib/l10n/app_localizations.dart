@@ -55,6 +55,7 @@ abstract class AppLocalizations {
   String get hostNotFound;
   String get cannotConnectToBackend;
   String get connectionTimeout;
+  String get encryptedConnection;
 }
 
 class AppLocalizationsEn extends AppLocalizations {
@@ -209,6 +210,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectionTimeout => 'Connection timeout - server not responding';
+
+  @override
+  String get encryptedConnection => 'Encrypted connection';
 }
 
 // Polish localization ready to be implemented
@@ -364,6 +368,9 @@ class AppLocalizationsPl extends AppLocalizations {
 
   @override
   String get connectionTimeout => 'Timeout połączenia - serwer nie odpowiada';
+
+  @override
+  String get encryptedConnection => 'Szyfrowane połączenie';
 }
 
 class AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

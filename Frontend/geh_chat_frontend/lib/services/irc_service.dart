@@ -46,10 +46,10 @@ class IrcService {
   String get nickname => _nickname ?? '';
 
   IrcService({String? server, int? port, String? channel, String? backendUrl})
-      : server = server ?? 'slaugh.pl',
-        port = port ?? 6667,
-        channel = channel ?? '#vorest',
-        backendUrl = backendUrl ?? 'ws://localhost:8000/ws' {
+    : server = server ?? 'slaugh.pl',
+      port = port ?? 6667,
+      channel = channel ?? '#vorest',
+      backendUrl = backendUrl ?? 'ws://localhost:8000/ws' {
     _encryptionService = EncryptionService(debugMode: debugMode);
     _initializeManagers();
   }
@@ -346,9 +346,7 @@ class IrcService {
       _connectionStateController.add(IrcConnectionState.disconnected);
     }
 
-    _addSystemMessage(
-      IrcTranslations.get('disconnected', isPolish: _isPolish),
-    );
+    _addSystemMessage(IrcTranslations.get('disconnected', isPolish: _isPolish));
   }
 
   void startKeepaliveTimer() {
@@ -412,6 +410,13 @@ class IrcService {
   String _getSessionKeyName(String user1, String user2) {
     final users = [user1, user2]..sort();
     return '${users[0]}_${users[1]}';
+  }
+
+  /// Check if there's an encrypted session with a given user
+  bool hasEncryptedSession(String otherUser) {
+    if (_nickname == null) return false;
+    final sessionKey = _getSessionKeyName(_nickname!, otherUser);
+    return _encryptionService.sessionKeys.containsKey(sessionKey);
   }
 }
 
